@@ -111,7 +111,7 @@ def image_caption_kb(page_id: int | None = None) -> InlineKeyboardMarkup:
 def themes_kb(prefix: str, selected: str = "") -> InlineKeyboardMarkup:
     rows = []
     for x in THEMES.values():
-        mark = "✓ " if x.key == selected else ""
+        mark = "▼ " if x.key == selected else ""
         rows.append([ib(f"{mark}{x.name}", f"{prefix}:{x.key}")])
     rows.append([ib("⬅️ Назад", f"{prefix}:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -240,7 +240,7 @@ def settings_kb(watermark: bool | None = None) -> InlineKeyboardMarkup:
 def quality_kb(selected: str) -> InlineKeyboardMarkup:
     names = {"standard": "Обычное", "high": "Высокое", "ultra": "Очень высокое"}
     rows = [
-        [ib(("✓ " if k == selected else "") + v, f"quality:{k}")]
+        [ib(("▼ " if k == selected else "") + v, f"quality:{k}")]
         for k, v in names.items()
     ]
     rows.append([ib("⬅️ Назад", "settings:back")])

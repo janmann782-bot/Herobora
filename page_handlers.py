@@ -562,7 +562,7 @@ async def page_theme(q: CallbackQuery, db: Db) -> None:
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
-        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme))
+        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("pt:"))
