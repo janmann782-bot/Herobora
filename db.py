@@ -203,7 +203,7 @@ class Db:
         if not p:
             return None
         p.id = None
-        p.title = f"{p.title} — копия"
+        p.title = f"{p.title} - копия"
         p.data = json.loads(json.dumps(p.data, ensure_ascii=False))
         p.data["title"] = p.title
         p.preview_path = None

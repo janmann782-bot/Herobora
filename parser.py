@@ -183,10 +183,10 @@ def parse_text(text: str) -> ParsedPage:
             limit = 250
         if len(value) > limit:
             value = value[:limit]
-            warnings.append(f"Значение «{label}» сокращено до {limit} символов.")
+            warnings.append(f"Поле {label}: значение сокращено до {limit} символов")
         if key in allowed:
             if key in data:
-                warnings.append(f"Поле «{label}» встретилось несколько раз; взято последнее значение.")
+                warnings.append(f"Поле {label} встретилось несколько раз, взято последнее значение")
             data[key] = value
         elif len(data["custom_fields"]) < 20:
             data["custom_fields"].append({"name": label[:100], "value": value})
@@ -197,7 +197,7 @@ def parse_text(text: str) -> ParsedPage:
         data.pop("custom_fields")
 
     if "title" not in data:
-        warnings.append("Название не найдено — его нужно будет ввести вручную.")
+        warnings.append("Название не найдено, его нужно будет ввести вручную")
 
     return ParsedPage(page_type, data, unknown, warnings)
 

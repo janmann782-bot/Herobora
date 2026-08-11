@@ -14,6 +14,7 @@ from PIL import Image
 
 from config import Config
 from create_handlers import (
+    draft_image_caption_action,
     draft_theme,
     quick_input,
     remove_draft_image,
@@ -21,17 +22,19 @@ from create_handlers import (
     skip_image,
     start_new,
     take_image,
+    take_draft_image_caption,
     take_field,
 )
 from db import Db
 from models import Page
-from page_handlers import take_page_value
+from page_handlers import take_page_image_caption, take_page_value
 from states import EditPage, NewPage
 from templates import COUNTRY
 from ui import (
     draft_kb,
     fields_kb,
     image_kb,
+    image_caption_kb,
     page_actions_kb,
     page_image_kb,
     progress_text,
@@ -162,10 +165,20 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
 
         bot = SimpleNamespace(download=AsyncMock(side_effect=download))
         await take_image(msg, self.state, bot, self.db, self.cfg)
+        self.assertEqual(await self.state.get_state(), NewPage.image_caption.state)
+        msg.text = "Первая картинка"
+        await take_draft_image_caption(msg, self.state)
+
+        msg.text = None
         await take_image(msg, self.state, bot, self.db, self.cfg)
+        await draft_image_caption_action(fake_callback("imgcap:skip", msg), self.state)
 
         d = await self.state.get_data()
         self.assertEqual(len(d["page_data"]["images"]), 2)
+        self.assertEqual(
+            d["page_data"]["image_captions"][d["page_data"]["images"][0]],
+            "Первая картинка",
+        )
         self.assertEqual(await self.state.get_state(), NewPage.image.state)
 
         await remove_draft_image(
@@ -176,6 +189,27 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         d = await self.state.get_data()
         self.assertEqual(len(d["page_data"]["images"]), 1)
+        self.assertNotIn("image_caption", d["page_data"])
+
+    async def test_saved_page_image_caption_is_updated(self):
+        path = "media_10_test.webp"
+        p = await self.db.save_page(
+            Page(
+                owner_id=10,
+                type="country",
+                title="Турбания",
+                data={"title": "Турбания", "images": [path], "image": path},
+            )
+        )
+        await self.state.set_state(EditPage.image_caption)
+        await self.state.update_data(page_id=p.id, caption_path=path, caption_i=0)
+        msg = fake_message(text="Новая подпись")
+
+        await take_page_image_caption(msg, self.state, self.db, self.cfg)
+
+        saved = await self.db.get_page(p.id, 10)
+        self.assertEqual(saved.data["image_caption"], "Новая подпись")
+        self.assertEqual(await self.state.get_state(), EditPage.image.state)
 
 
 class KeyboardTests(unittest.TestCase):
@@ -200,6 +234,8 @@ class KeyboardTests(unittest.TestCase):
             types_kb(),
             draft_kb(),
             image_kb(10),
+            image_caption_kb(),
+            image_caption_kb(123456789),
             page_actions_kb(123456789),
             page_image_kb(123456789, 10),
             settings_kb(),

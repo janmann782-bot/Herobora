@@ -102,7 +102,7 @@ AURELIA = Theme(
     heading_font="'Isaac Fill', 'InfoBox Mono', monospace",
     border_width=3,
     radius=0,
-    pixel_border=True,
+    pixel_border=False,
     image_border="#a9f38f",
 )
 

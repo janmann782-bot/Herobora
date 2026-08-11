@@ -36,7 +36,43 @@ def page_images(data: dict) -> list[str]:
     return out[:MAX_PAGE_IMAGES]
 
 
+def image_caption(data: dict, path: str, index: int = 0) -> str:
+    captions = data.get("image_captions")
+    if isinstance(captions, dict):
+        value = captions.get(path)
+        if isinstance(value, str):
+            return value
+    if index == 0:
+        return str(data.get("image_caption") or "")
+    return ""
+
+
+def set_image_caption(data: dict, path: str, caption: str) -> None:
+    value = caption.strip()
+    captions = data.get("image_captions")
+    captions = dict(captions) if isinstance(captions, dict) else {}
+
+    if value:
+        captions[path] = value
+    else:
+        captions.pop(path, None)
+
+    if captions:
+        data["image_captions"] = captions
+    else:
+        data.pop("image_captions", None)
+
+    images = page_images(data)
+    if images and images[0] == path:
+        if value:
+            data["image_caption"] = value
+        else:
+            data.pop("image_caption", None)
+
+
 def set_page_images(data: dict, images: list[str]) -> None:
+    old = page_images(data)
+    legacy_caption = str(data.get("image_caption") or "").strip()
     items = []
     for x in images:
         if isinstance(x, str) and x and x not in items:
@@ -48,6 +84,28 @@ def set_page_images(data: dict, images: list[str]) -> None:
     else:
         data.pop("images", None)
         data.pop("image", None)
+
+    captions = data.get("image_captions")
+    captions = {
+        k: v
+        for k, v in captions.items()
+        if isinstance(k, str) and k in items and isinstance(v, str) and v.strip()
+    } if isinstance(captions, dict) else {}
+    if captions:
+        data["image_captions"] = captions
+    else:
+        data.pop("image_captions", None)
+
+    if not items:
+        data.pop("image_caption", None)
+    elif items[0] in captions:
+        data["image_caption"] = captions[items[0]]
+    elif not old and legacy_caption:
+        captions[items[0]] = legacy_caption
+        data["image_captions"] = captions
+        data["image_caption"] = legacy_caption
+    elif old and old[0] != items[0]:
+        data.pop("image_caption", None)
 
 
 async def save_image(
@@ -61,9 +119,9 @@ async def save_image(
 
 def _save_image(raw: bytes, owner_id: int, work_dir: Path, max_mb: int) -> MediaInfo:
     if not raw:
-        raise BadImage("Файл пустой.")
+        raise BadImage("файл пустой")
     if len(raw) > max_mb * 1024 * 1024:
-        raise BadImage(f"Изображение больше {max_mb} МБ.")
+        raise BadImage(f"изображение больше {max_mb} МБ")
 
     work_dir = work_dir.resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -79,9 +137,9 @@ def _save_image(raw: bytes, owner_id: int, work_dir: Path, max_mb: int) -> Media
                 img = ImageOps.exif_transpose(src)
                 img.load()
                 if img.width < 16 or img.height < 16:
-                    raise BadImage("Изображение слишком маленькое.")
+                    raise BadImage("изображение слишком маленькое")
                 if img.width * img.height > 40_000_000:
-                    raise BadImage("Слишком большое разрешение изображения.")
+                    raise BadImage("слишком большое разрешение изображения")
 
                 if max(img.size) > 5000:
                     img.thumbnail((5000, 5000), Image.Resampling.LANCZOS)
@@ -103,7 +161,7 @@ def _save_image(raw: bytes, owner_id: int, work_dir: Path, max_mb: int) -> Media
         Image.DecompressionBombError,
         Image.DecompressionBombWarning,
     ) as e:
-        raise BadImage("Не получилось прочитать изображение. Нужен PNG, JPEG или WEBP.") from e
+        raise BadImage("не получилось прочитать изображение, нужен PNG, JPEG или WEBP") from e
     finally:
         if tmp and tmp.exists():
             tmp.unlink(missing_ok=True)

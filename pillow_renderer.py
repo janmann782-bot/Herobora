@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from media import page_images
+from media import image_caption, page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
@@ -235,8 +235,7 @@ def _picture(
 def _gallery(
     w: int,
     s: float,
-    paths: list[Path],
-    caption: object,
+    items: list[tuple[Path, str]],
     theme: Theme,
 ) -> Image.Image | None:
     pad = int(20 * s)
@@ -244,7 +243,7 @@ def _gallery(
     cell_w = (w - pad * 2 - gap) // 2
     max_h = int(360 * s)
     pics = []
-    for path in paths:
+    for path, caption in items:
         try:
             src = ImageOps.exif_transpose(Image.open(path))
             src.load()
@@ -257,44 +256,58 @@ def _gallery(
             src = base.convert("RGB")
         else:
             src = src.convert("RGB")
-        pics.append(src)
+        pics.append((src, caption, path))
 
     if not pics:
         return None
     if len(pics) == 1:
-        return _picture(w, s, paths[0], caption, theme)
+        _, caption, path = pics[0]
+        return _picture(w, s, path, caption, theme)
 
-    rows = [pics[i : i + 2] for i in range(0, len(pics), 2)]
-    heights = [max(x.height for x in row) for row in rows]
     cap_font = _font(theme, max(13, int(16 * s)))
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    lines = _wrap(tmp, caption, cap_font, w - pad * 2) if caption else []
     lh = _line_h(tmp, cap_font)
-    cap_gap = int(8 * s) if lines else 0
-    h = pad * 2 + sum(heights) + gap * (len(rows) - 1) + cap_gap + len(lines) * lh
+    text_pad = int(8 * s)
+    prepared = []
+    for src, caption, _ in pics:
+        lines = _wrap(tmp, caption, cap_font, cell_w - text_pad * 2) if caption else []
+        cap_gap = int(8 * s) if lines else 0
+        prepared.append((src, lines, src.height + cap_gap + len(lines) * lh))
+
+    rows = [prepared[i : i + 2] for i in range(0, len(prepared), 2)]
+    heights = [max(x[2] for x in row) for row in rows]
+    h = pad * 2 + sum(heights) + gap * (len(rows) - 1)
     img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
     bw = max(1, int(theme.border_width * s))
     y = pad
     for row, row_h in zip(rows, heights):
-        for i, src in enumerate(row):
+        for i, (src, lines, item_h) in enumerate(row):
             if len(row) == 1:
-                x = (w - src.width) // 2
+                cell_x = (w - cell_w) // 2
             else:
                 cell_x = pad + i * (cell_w + gap)
-                x = cell_x + (cell_w - src.width) // 2
-            yy = y + (row_h - src.height) // 2
+            x = cell_x + (cell_w - src.width) // 2
+            yy = y + (row_h - item_h) // 2
             img.paste(src, (x, yy))
             draw.rectangle(
                 (x, yy, x + src.width - 1, yy + src.height - 1),
                 outline=theme.image_border,
                 width=bw,
             )
+            if lines:
+                cap_y = yy + src.height + int(8 * s)
+                _draw_lines(
+                    draw,
+                    lines,
+                    (cell_x + text_pad, cap_y),
+                    cap_font,
+                    theme.text_secondary,
+                    lh,
+                    cell_w - text_pad * 2,
+                    "center",
+                )
         y += row_h + gap
-    if lines:
-        y -= gap
-        y += cap_gap
-        _draw_lines(draw, lines, (pad, y), cap_font, theme.text_secondary, lh, w - pad * 2, "center")
     return img
 
 
@@ -450,10 +463,13 @@ def render_pillow(
     inner_w = card_w - bw * 2
     blocks = [_header(inner_w, s, tpl, page, theme)]
 
-    media = [_media_path(x, root) for x in page_images(d)]
-    media = [x for x in media if x]
+    media = []
+    for i, value in enumerate(page_images(d)):
+        media_path = _media_path(value, root)
+        if media_path:
+            media.append((media_path, image_caption(d, value, i)))
     if media:
-        pic = _gallery(inner_w, s, media, d.get("image_caption", ""), theme)
+        pic = _gallery(inner_w, s, media, theme)
         if pic:
             blocks.append(pic)
 
@@ -507,14 +523,6 @@ def render_pillow(
         if i < len(blocks) - 1:
             draw.line((x, y, x + inner_w - 1, y), fill=theme.border, width=bw)
             y += bw
-
-    if theme.pixel_border:
-        inset = outer + int(5 * s)
-        draw.rectangle(
-            (inset, inset, img.width - inset - 1, img.height - inset - 1),
-            outline=theme.accent,
-            width=bw,
-        )
 
     img.save(path, "PNG", compress_level=6, dpi=(144, 144))
     return path

@@ -67,8 +67,14 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
 def image_kb(count: int = 0) -> InlineKeyboardMarkup:
     rows = []
     if count:
-        rows.append([ib(f"✅ Готово · {count}", "img:done")])
-        rows.extend([ib(f"🗑 Удалить изображение {i + 1}", f"img:rm:{i}")] for i in range(count))
+        rows.append([ib(f"✅ Готово ({count})", "img:done")])
+        for i in range(count):
+            rows.append(
+                [
+                    ib(f"✏️ Подпись {i + 1}", f"img:cap:{i}"),
+                    ib(f"🗑 Картинка {i + 1}", f"img:rm:{i}"),
+                ]
+            )
     else:
         rows.append([ib("⏭ Без изображений", "img:done")])
     rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel")]]
@@ -76,13 +82,30 @@ def image_kb(count: int = 0) -> InlineKeyboardMarkup:
 
 
 def page_image_kb(page_id: int, count: int) -> InlineKeyboardMarkup:
-    rows = [[ib(f"✅ Готово · {count}", f"pi:{page_id}:done")]]
-    rows.extend(
-        [ib(f"🗑 Удалить изображение {i + 1}", f"pi:{page_id}:rm:{i}")]
-        for i in range(count)
-    )
+    rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done")]]
+    for i in range(count):
+        rows.append(
+            [
+                ib(f"✏️ Подпись {i + 1}", f"pi:{page_id}:cap:{i}"),
+                ib(f"🗑 Картинка {i + 1}", f"pi:{page_id}:rm:{i}"),
+            ]
+        )
     rows.append([ib("⬅️ К странице", f"p:o:{page_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def image_caption_kb(page_id: int | None = None) -> InlineKeyboardMarkup:
+    if page_id is None:
+        skip, back = "imgcap:skip", "imgcap:back"
+    else:
+        skip, back = f"pc:{page_id}:skip", f"pc:{page_id}:back"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [ib("⏭ Без подписи", skip)],
+            [ib("⬅️ К изображениям", back)],
+            [ib("❌ Отмена", "flow:cancel" if page_id is None else f"p:o:{page_id}")],
+        ]
+    )
 
 
 def themes_kb(prefix: str, selected: str = "") -> InlineKeyboardMarkup:

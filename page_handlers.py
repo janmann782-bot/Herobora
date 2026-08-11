@@ -14,7 +14,16 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
-from media import MAX_PAGE_IMAGES, BadImage, page_images, safe_unlink, save_image, set_page_images
+from media import (
+    MAX_PAGE_IMAGES,
+    BadImage,
+    image_caption,
+    page_images,
+    safe_unlink,
+    save_image,
+    set_image_caption,
+    set_page_images,
+)
 from models import Page
 from parser import parse_section
 from renderer import render_error_text, render_page
@@ -26,6 +35,7 @@ from ui import (
     delete_kb,
     edit_value_kb,
     fields_kb,
+    image_caption_kb,
     main_menu,
     page_actions_kb,
     page_image_kb,
@@ -38,6 +48,7 @@ from ui import (
 
 router = Router(name="pages")
 log = logging.getLogger(__name__)
+IMAGE_CAPTION_LIMIT = 500
 
 
 def valid_preview(path: str | None, cfg: Config) -> Path | None:
@@ -230,7 +241,9 @@ async def take_page_value(msg: Message, state: FSMContext, db: Db, cfg: Config) 
         if key == "title" and not value:
             await msg.answer(tr("title_required"))
             return
-        if value:
+        if key == "image_caption" and page_images(p.data):
+            set_image_caption(p.data, page_images(p.data)[0], value)
+        elif value:
             p.data[key] = value
         else:
             p.data.pop(key, None)
@@ -408,9 +421,17 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     p.preview_path = None
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height, p.id)
     await db.update_page(p)
+    await state.update_data(
+        page_id=p.id,
+        caption_path=info.path.name,
+        caption_i=len(images) - 1,
+    )
+    await state.set_state(EditPage.image_caption)
     await msg.answer(
-        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES),
-        reply_markup=page_image_kb(p.id, len(images)),
+        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES)
+        + "\n\n"
+        + tr("image_caption_prompt", number=len(images), limit=IMAGE_CAPTION_LIMIT),
+        reply_markup=image_caption_kb(p.id),
     )
 
 
@@ -432,6 +453,19 @@ async def page_image_action(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
         await state.clear()
         await render_saved(q.message, p, db, cfg)
         return
+    if action == "cap" and len(parts) == 4:
+        i = int(parts[3])
+        if not 0 <= i < len(images):
+            return
+        path = images[i]
+        await state.update_data(page_id=page_id, caption_path=path, caption_i=i)
+        await state.set_state(EditPage.image_caption)
+        s = tr("image_caption_prompt", number=i + 1, limit=IMAGE_CAPTION_LIMIT)
+        current = image_caption(p.data, path, i)
+        if current:
+            s += "\n\n" + tr("current_value", value=current[:500])
+        await q.message.answer(s, reply_markup=image_caption_kb(page_id))
+        return
     if action != "rm" or len(parts) != 4:
         return
 
@@ -449,6 +483,76 @@ async def page_image_action(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
         tr("image_removed", number=i + 1, count=len(images)),
         reply_markup=page_image_kb(page_id, len(images)),
     )
+
+
+@router.message(EditPage.image_caption)
+async def take_page_image_caption(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    d = await state.get_data()
+    page_id = int(d["page_id"])
+    if not msg.text:
+        await msg.answer(tr("text_only"), reply_markup=image_caption_kb(page_id))
+        return
+    s = msg.text.strip()
+    if not s:
+        await msg.answer(tr("empty_value"), reply_markup=image_caption_kb(page_id))
+        return
+    if len(s) > IMAGE_CAPTION_LIMIT:
+        await msg.answer(
+            tr("too_long", limit=IMAGE_CAPTION_LIMIT),
+            reply_markup=image_caption_kb(page_id),
+        )
+        return
+
+    p = await db.get_page(page_id, msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    images = page_images(p.data)
+    path = str(d.get("caption_path") or "")
+    if path not in images:
+        await state.set_state(EditPage.image)
+        await msg.answer(tr("images_continue"), reply_markup=page_image_kb(page_id, len(images)))
+        return
+
+    set_image_caption(p.data, path, s)
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await state.update_data(page_id=page_id, caption_path=None, caption_i=None)
+    await state.set_state(EditPage.image)
+    await msg.answer(tr("image_caption_saved"), reply_markup=page_image_kb(page_id, len(images)))
+
+
+@router.callback_query(EditPage.image_caption, F.data.startswith("pc:"))
+async def page_image_caption_action(
+    q: CallbackQuery,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    await q.answer()
+    _, raw_id, action = q.data.split(":")
+    page_id = int(raw_id)
+    p = await get_owned(q, db, page_id)
+    if not p:
+        await state.clear()
+        return
+
+    d = await state.get_data()
+    images = page_images(p.data)
+    path = str(d.get("caption_path") or "")
+    text = tr("images_continue")
+    if action == "skip" and path in images:
+        set_image_caption(p.data, path, "")
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        p.preview_path = None
+        await db.update_page(p)
+        text = tr("image_caption_skipped")
+
+    await state.update_data(page_id=page_id, caption_path=None, caption_i=None)
+    await state.set_state(EditPage.image)
+    await q.message.answer(text, reply_markup=page_image_kb(page_id, len(images)))
 
 
 @router.callback_query(F.data.startswith("p:t:"))

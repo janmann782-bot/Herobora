@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from media import page_images
+from media import image_caption, page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
@@ -163,16 +163,18 @@ def make_html(
     d = page.data
     title = d.get("title") or page.title or "Без названия"
     subtitle = d.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
-    images = [image_uri(x, work_dir) for x in page_images(d)]
-    images = [x for x in images if x]
-    caption = d.get("image_caption", "")
+    images = []
+    for i, path in enumerate(page_images(d)):
+        uri = image_uri(path, work_dir)
+        if uri:
+            images.append((uri, image_caption(d, path, i)))
     description = d.get("description", "")
 
     gallery = ""
     if images:
         figures = []
-        for i, img in enumerate(images):
-            cap = f"<figcaption>{value_html(caption)}</figcaption>" if i == 0 and caption else ""
+        for img, caption in images:
+            cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ""
             figures.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
         mode = "single" if len(figures) == 1 else "multi"
         gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
@@ -204,10 +206,6 @@ body {{ padding: 26px; font-family: var(--font); font-size: 20px; line-height: 1
   position: relative; width: 820px; overflow: hidden; margin: 0 auto;
   background: var(--panel); border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
-}}
-.sheet::before {{
-  content: ""; position: absolute; inset: 4px; pointer-events: none;
-  border: var(--pixel-step) solid var(--accent);
 }}
 header {{ padding: 24px 28px 20px; text-align: center; background: var(--panel-alt); border-bottom: var(--border-width) solid var(--border); }}
 .kind {{ color: var(--accent); font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}

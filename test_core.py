@@ -10,7 +10,14 @@ from pathlib import Path
 from PIL import Image
 
 from db import Db
-from media import BadImage, page_images, save_image, set_page_images
+from media import (
+    BadImage,
+    image_caption,
+    page_images,
+    save_image,
+    set_image_caption,
+    set_page_images,
+)
 from models import Page
 from parser import parse_section, parse_text
 from pillow_renderer import render_pillow
@@ -29,6 +36,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(aurelia.background, "#000000")
         self.assertEqual(aurelia.text, aurelia.accent)
         self.assertEqual(aurelia.border_width, 3)
+        self.assertFalse(aurelia.pixel_border)
         self.assertIn("Isaac Fill", aurelia.font)
         self.assertEqual(get_theme("nope").key, "light")
 
@@ -94,7 +102,7 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.db.update_page(p))
 
         copy = await self.db.copy_page(p.id, 7)
-        self.assertEqual(copy.title, "Иван — копия")
+        self.assertEqual(copy.title, "Иван - копия")
         self.assertTrue(await self.db.delete_page(p.id, 7))
         self.assertFalse(await self.db.delete_page(copy.id, 8))
 
@@ -174,6 +182,18 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d["image"], "media_one.webp")
         self.assertEqual(d["images"], ["media_one.webp", "media_two.webp"])
 
+    async def test_each_image_keeps_its_own_caption(self):
+        d = {"images": ["media_one.webp", "media_two.webp"]}
+        set_page_images(d, d["images"])
+        set_image_caption(d, "media_one.webp", "Первое изображение")
+        set_image_caption(d, "media_two.webp", "Второе изображение")
+        self.assertEqual(image_caption(d, "media_one.webp", 0), "Первое изображение")
+        self.assertEqual(image_caption(d, "media_two.webp", 1), "Второе изображение")
+
+        set_page_images(d, ["media_two.webp"])
+        self.assertEqual(image_caption(d, "media_two.webp", 0), "Второе изображение")
+        self.assertNotIn("media_one.webp", d["image_captions"])
+
     async def test_image_is_checked_and_gets_random_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             buf = BytesIO()
@@ -201,6 +221,29 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
             p.data["image"] = "/etc/passwd"
             self.assertNotIn("data:image/webp;base64,", make_html(p, work_dir=tmp))
 
+    async def test_html_renders_caption_for_each_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            names = ["media_one.webp", "media_two.webp"]
+            for name in names:
+                Image.new("RGB", (32, 32), "blue").save(Path(tmp) / name, "WEBP")
+            p = Page(
+                owner_id=1,
+                type="country",
+                title="Тест",
+                data={
+                    "title": "Тест",
+                    "images": names,
+                    "image_captions": {
+                        names[0]: "Подпись один",
+                        names[1]: "Подпись два",
+                    },
+                },
+            )
+            s = make_html(p, work_dir=tmp)
+            self.assertIn("Подпись один", s)
+            self.assertIn("Подпись два", s)
+            self.assertNotIn("sheet::before", s)
+
 
 class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
     async def test_pillow_fallback_png(self):
@@ -219,7 +262,10 @@ class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
                     "capital": "Светлозорь",
                     "population": "18 500 000",
                     "images": [media.name, media2.name],
-                    "image_caption": "Главное изображение",
+                    "image_captions": {
+                        media.name: "Главное изображение",
+                        media2.name: "Второе изображение",
+                    },
                     "custom_fields": [{"name": "Военный резерв", "value": "420 000"}],
                 },
             )

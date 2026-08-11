@@ -14,7 +14,16 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
-from media import MAX_PAGE_IMAGES, BadImage, page_images, safe_unlink, save_image, set_page_images
+from media import (
+    MAX_PAGE_IMAGES,
+    BadImage,
+    image_caption,
+    page_images,
+    safe_unlink,
+    save_image,
+    set_image_caption,
+    set_page_images,
+)
 from models import Page
 from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
@@ -30,6 +39,7 @@ from ui import (
     draft_kb,
     edit_value_kb,
     fields_kb,
+    image_caption_kb,
     image_kb,
     main_menu,
     page_actions_kb,
@@ -44,6 +54,7 @@ from ui import (
 
 router = Router(name="create")
 log = logging.getLogger(__name__)
+IMAGE_CAPTION_LIMIT = 500
 
 
 async def ask_field(msg: Message, state: FSMContext) -> None:
@@ -284,6 +295,26 @@ async def remove_draft_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: C
     )
 
 
+@router.callback_query(NewPage.image, F.data.startswith("img:cap:"))
+async def edit_draft_image_caption(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = page_images(data)
+    i = int(q.data.rsplit(":", 1)[1])
+    if not 0 <= i < len(images):
+        return
+
+    path = images[i]
+    await state.update_data(caption_path=path, caption_i=i)
+    await state.set_state(NewPage.image_caption)
+    s = tr("image_caption_prompt", number=i + 1, limit=IMAGE_CAPTION_LIMIT)
+    current = image_caption(data, path, i)
+    if current:
+        s += "\n\n" + tr("current_value", value=current[:500])
+    await q.message.answer(s, reply_markup=image_caption_kb())
+
+
 @router.message(NewPage.image)
 async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Config) -> None:
     d = await state.get_data()
@@ -327,11 +358,70 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
     images.append(info.path.name)
     set_page_images(data, images)
-    await state.update_data(page_data=data)
-    await msg.answer(
-        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES),
-        reply_markup=image_kb(len(images)),
+    await state.update_data(
+        page_data=data,
+        caption_path=info.path.name,
+        caption_i=len(images) - 1,
     )
+    await state.set_state(NewPage.image_caption)
+    await msg.answer(
+        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES)
+        + "\n\n"
+        + tr("image_caption_prompt", number=len(images), limit=IMAGE_CAPTION_LIMIT),
+        reply_markup=image_caption_kb(),
+    )
+
+
+@router.message(NewPage.image_caption)
+async def take_draft_image_caption(msg: Message, state: FSMContext) -> None:
+    if not msg.text:
+        await msg.answer(tr("text_only"), reply_markup=image_caption_kb())
+        return
+    s = msg.text.strip()
+    if not s:
+        await msg.answer(tr("empty_value"), reply_markup=image_caption_kb())
+        return
+    if len(s) > IMAGE_CAPTION_LIMIT:
+        await msg.answer(
+            tr("too_long", limit=IMAGE_CAPTION_LIMIT),
+            reply_markup=image_caption_kb(),
+        )
+        return
+
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = page_images(data)
+    path = str(d.get("caption_path") or "")
+    if path not in images:
+        await state.set_state(NewPage.image)
+        await msg.answer(tr("images_continue"), reply_markup=image_kb(len(images)))
+        return
+
+    set_image_caption(data, path, s)
+    await state.update_data(page_data=data, caption_path=None, caption_i=None)
+    await state.set_state(NewPage.image)
+    await msg.answer(tr("image_caption_saved"), reply_markup=image_kb(len(images)))
+
+
+@router.callback_query(NewPage.image_caption, F.data.startswith("imgcap:"))
+async def draft_image_caption_action(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    action = q.data.split(":", 1)[1]
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = page_images(data)
+    path = str(d.get("caption_path") or "")
+
+    if action == "skip" and path in images:
+        set_image_caption(data, path, "")
+        await state.update_data(page_data=data)
+        text = tr("image_caption_skipped")
+    else:
+        text = tr("images_continue")
+
+    await state.update_data(caption_path=None, caption_i=None)
+    await state.set_state(NewPage.image)
+    await q.message.answer(text, reply_markup=image_kb(len(images)))
 
 
 @router.callback_query(F.data.startswith("dt:"))
@@ -471,7 +561,10 @@ async def take_draft_edit(msg: Message, state: FSMContext, db: Db, cfg: Config) 
         if key == "title" and not value:
             await msg.answer(tr("title_required"))
             return
-        data[key] = value
+        if key == "image_caption" and page_images(data):
+            set_image_caption(data, page_images(data)[0], value)
+        else:
+            data[key] = value
     elif kind == "custom":
         data["custom_fields"][int(d["edit_i"])]["value"] = value
     elif kind == "section":

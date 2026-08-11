@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class NewPage(StatesGroup):
     field = State()
     image = State()
+    image_caption = State()
     theme = State()
     review = State()
     edit_value = State()
@@ -31,6 +32,7 @@ class EditPage(StatesGroup):
     custom_value = State()
     section = State()
     image = State()
+    image_caption = State()
 
 
 async def clear_flow(state: FSMContext, user_id: int, db: Db, cfg: Config) -> None:
