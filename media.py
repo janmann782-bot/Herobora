@@ -10,6 +10,7 @@ from uuid import uuid4
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
+MAX_PAGE_IMAGES = 10
 
 
 class BadImage(ValueError):
@@ -22,6 +23,31 @@ class MediaInfo:
     width: int
     height: int
     size: int
+
+
+def page_images(data: dict) -> list[str]:
+    out = []
+    for x in data.get("images") or []:
+        if isinstance(x, str) and x and x not in out:
+            out.append(x)
+    old = data.get("image")
+    if isinstance(old, str) and old and old not in out:
+        out.insert(0, old)
+    return out[:MAX_PAGE_IMAGES]
+
+
+def set_page_images(data: dict, images: list[str]) -> None:
+    items = []
+    for x in images:
+        if isinstance(x, str) and x and x not in items:
+            items.append(x)
+    items = items[:MAX_PAGE_IMAGES]
+    if items:
+        data["images"] = items
+        data["image"] = items[0]
+    else:
+        data.pop("images", None)
+        data.pop("image", None)
 
 
 async def save_image(

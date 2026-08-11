@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from db import Db
-from media import BadImage, save_image
+from media import BadImage, page_images, save_image, set_page_images
 from models import Page
 from parser import parse_section, parse_text
 from pillow_renderer import render_pillow
@@ -24,7 +24,12 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(get_template("country").label, "Страна")
         self.assertEqual(get_template("battle").get_field("side_2").column, 2)
         self.assertTrue(get_template("person").get_field("description").multiline)
-        self.assertEqual(get_theme("aurelia").accent, "#00ff66")
+        aurelia = get_theme("aurelia")
+        self.assertEqual(aurelia.accent, "#a9f38f")
+        self.assertEqual(aurelia.background, "#000000")
+        self.assertEqual(aurelia.text, aurelia.accent)
+        self.assertEqual(aurelia.border_width, 3)
+        self.assertIn("Isaac Fill", aurelia.font)
         self.assertEqual(get_theme("nope").key, "light")
 
     def test_fast_parser_is_not_strict_about_separators(self):
@@ -122,6 +127,22 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         saved = await self.db.get_page(p.id, 88)
         self.assertIsNone(saved.preview_path)
 
+    async def test_shared_media_is_removed_only_after_last_page(self):
+        path = "media_5_shared.webp"
+        p1 = await self.db.save_page(
+            Page(owner_id=5, type="country", title="Один", data={"title": "Один", "image": path})
+        )
+        p2 = await self.db.save_page(
+            Page(owner_id=5, type="country", title="Два", data={"title": "Два", "image": path})
+        )
+        self.assertFalse(await self.db.drop_media_if_unused(path, 5))
+        p1.data.pop("image")
+        await self.db.update_page(p1)
+        self.assertFalse(await self.db.drop_media_if_unused(path, 5))
+        p2.data.pop("image")
+        await self.db.update_page(p2)
+        self.assertTrue(await self.db.drop_media_if_unused(path, 5))
+
 
 class DbMigrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_old_settings_table_gets_watermark_column(self):
@@ -146,6 +167,13 @@ class DbMigrationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_and_multiple_page_images(self):
+        d = {"image": "media_old.webp", "images": ["media_two.webp"]}
+        self.assertEqual(page_images(d), ["media_old.webp", "media_two.webp"])
+        set_page_images(d, ["media_one.webp", "media_two.webp"])
+        self.assertEqual(d["image"], "media_one.webp")
+        self.assertEqual(d["images"], ["media_one.webp", "media_two.webp"])
+
     async def test_image_is_checked_and_gets_random_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             buf = BytesIO()
@@ -179,6 +207,8 @@ class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             media = Path(tmp) / "media_1_test.png"
             Image.new("RGB", (640, 360), "#315caa").save(media)
+            media2 = Path(tmp) / "media_1_test_2.png"
+            Image.new("RGB", (360, 640), "#a9f38f").save(media2)
             p = Page(
                 owner_id=1,
                 type="country",
@@ -188,7 +218,7 @@ class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
                     "title": "Турбания",
                     "capital": "Светлозорь",
                     "population": "18 500 000",
-                    "image": media.name,
+                    "images": [media.name, media2.name],
                     "image_caption": "Главное изображение",
                     "custom_fields": [{"name": "Военный резерв", "value": "420 000"}],
                 },

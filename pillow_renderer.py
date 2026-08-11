@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from media import page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
@@ -13,13 +14,20 @@ PILLOW_SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
 def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
-    mono = theme.key == "aurelia"
-    if mono:
-        name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
-    else:
-        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-
     here = Path(__file__).resolve().parent
+    if theme.key == "aurelia":
+        fallback_name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
+        fallback = _load_font(here, fallback_name, size)
+        isaac = here / "ISAACFONTDESCRIPTIONENGRUS-FILL_0.TTF"
+        if isaac.is_file():
+            return ImageFont.truetype(str(isaac), size), fallback
+        return fallback
+
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    return _load_font(here, name, size)
+
+
+def _load_font(here: Path, name: str, size: int):
     paths = [
         here / name,
         Path("/usr/share/fonts/truetype/dejavu") / name,
@@ -32,9 +40,37 @@ def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
     return ImageFont.load_default(size=size)
 
 
+def _font_runs(text: str, font):
+    if not isinstance(font, tuple):
+        return [(text, font)]
+
+    primary, fallback = font
+    out = []
+    buf = ""
+    cur = None
+    extra = "—–…«»№ "
+    for ch in text:
+        n = ord(ch)
+        use_primary = 32 <= n <= 126 or 0x0410 <= n <= 0x044F or n in {0x0401, 0x0451} or ch in extra
+        f = primary if use_primary else fallback
+        if cur is not None and f is not cur:
+            out.append((buf, cur))
+            buf = ""
+        buf += ch
+        cur = f
+    if buf:
+        out.append((buf, cur))
+    return out or [("", primary)]
+
+
 def _size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple[int, int]:
-    box = draw.textbbox((0, 0), text or "Ag", font=font)
-    return box[2] - box[0], box[3] - box[1]
+    width = 0
+    height = 0
+    for s, f in _font_runs(text or "Ag", font):
+        box = draw.textbbox((0, 0), s, font=f)
+        width += box[2] - box[0]
+        height = max(height, box[3] - box[1])
+    return width, height
 
 
 def _split_word(draw: ImageDraw.ImageDraw, word: str, font, max_w: int) -> list[str]:
@@ -95,7 +131,9 @@ def _draw_lines(
         if width and align != "left":
             w = _size(draw, line, font)[0]
             xx = x + (width - w if align == "right" else (width - w) // 2)
-        draw.text((xx, y), line, font=font, fill=fill)
+        for s, f in _font_runs(line, font):
+            draw.text((xx, y), s, font=f, fill=fill)
+            xx += _size(draw, s, f)[0]
         y += line_h
 
 
@@ -194,6 +232,72 @@ def _picture(
     return img
 
 
+def _gallery(
+    w: int,
+    s: float,
+    paths: list[Path],
+    caption: object,
+    theme: Theme,
+) -> Image.Image | None:
+    pad = int(20 * s)
+    gap = int(12 * s)
+    cell_w = (w - pad * 2 - gap) // 2
+    max_h = int(360 * s)
+    pics = []
+    for path in paths:
+        try:
+            src = ImageOps.exif_transpose(Image.open(path))
+            src.load()
+        except Exception:
+            continue
+        src.thumbnail((cell_w, max_h), Image.Resampling.LANCZOS)
+        if src.mode in {"RGBA", "LA"}:
+            base = Image.new("RGBA", src.size, theme.panel_alt)
+            base.alpha_composite(src.convert("RGBA"))
+            src = base.convert("RGB")
+        else:
+            src = src.convert("RGB")
+        pics.append(src)
+
+    if not pics:
+        return None
+    if len(pics) == 1:
+        return _picture(w, s, paths[0], caption, theme)
+
+    rows = [pics[i : i + 2] for i in range(0, len(pics), 2)]
+    heights = [max(x.height for x in row) for row in rows]
+    cap_font = _font(theme, max(13, int(16 * s)))
+    tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines = _wrap(tmp, caption, cap_font, w - pad * 2) if caption else []
+    lh = _line_h(tmp, cap_font)
+    cap_gap = int(8 * s) if lines else 0
+    h = pad * 2 + sum(heights) + gap * (len(rows) - 1) + cap_gap + len(lines) * lh
+    img = Image.new("RGB", (w, h), theme.panel)
+    draw = ImageDraw.Draw(img)
+    bw = max(1, int(theme.border_width * s))
+    y = pad
+    for row, row_h in zip(rows, heights):
+        for i, src in enumerate(row):
+            if len(row) == 1:
+                x = (w - src.width) // 2
+            else:
+                cell_x = pad + i * (cell_w + gap)
+                x = cell_x + (cell_w - src.width) // 2
+            yy = y + (row_h - src.height) // 2
+            img.paste(src, (x, yy))
+            draw.rectangle(
+                (x, yy, x + src.width - 1, yy + src.height - 1),
+                outline=theme.image_border,
+                width=bw,
+            )
+        y += row_h + gap
+    if lines:
+        y -= gap
+        y += cap_gap
+        _draw_lines(draw, lines, (pad, y), cap_font, theme.text_secondary, lh, w - pad * 2, "center")
+    return img
+
+
 def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     font = _font(theme, max(17, int(22 * s)), bold=True, heading=True)
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -222,7 +326,11 @@ def _row(w: int, s: float, label: object, value: object, theme: Theme) -> Image.
     img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
     draw.rectangle((0, 0, label_w, h), fill=theme.panel_alt)
-    draw.line((label_w, 0, label_w, h), fill=theme.border, width=max(1, int(s)))
+    draw.line(
+        (label_w, 0, label_w, h),
+        fill=theme.border,
+        width=max(1, int(theme.border_width * s)),
+    )
     _draw_lines(draw, left, (pad_x, pad_y), label_font, theme.text_secondary, lh1)
     _draw_lines(draw, right, (label_w + pad_x, pad_y), value_font, theme.text, lh2)
     return img
@@ -255,7 +363,11 @@ def _side_rows(w: int, s: float, fields: list[Field], data: dict, theme: Theme) 
     h = max(max(heights), int(52 * s)) + pad_y
     img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
-    draw.line((col_w, 0, col_w, h), fill=theme.border, width=max(1, int(s)))
+    draw.line(
+        (col_w, 0, col_w, h),
+        fill=theme.border,
+        width=max(1, int(theme.border_width * s)),
+    )
     for i, items in enumerate(cols):
         y = pad_y
         x = i * col_w + pad_x
@@ -264,7 +376,7 @@ def _side_rows(w: int, s: float, fields: list[Field], data: dict, theme: Theme) 
                 draw.line(
                     (i * col_w + pad_x, y - gap // 2, (i + 1) * col_w - pad_x, y - gap // 2),
                     fill=theme.border,
-                    width=max(1, int(s)),
+                    width=max(1, int(theme.border_width * s)),
                 )
             _draw_lines(draw, labels, (x, y), label_font, theme.text_secondary, lh1)
             y += len(labels) * lh1 + int(3 * s)
@@ -338,9 +450,10 @@ def render_pillow(
     inner_w = card_w - bw * 2
     blocks = [_header(inner_w, s, tpl, page, theme)]
 
-    media = _media_path(d.get("image"), root)
+    media = [_media_path(x, root) for x in page_images(d)]
+    media = [x for x in media if x]
     if media:
-        pic = _picture(inner_w, s, media, d.get("image_caption", ""), theme)
+        pic = _gallery(inner_w, s, media, d.get("image_caption", ""), theme)
         if pic:
             blocks.append(pic)
 
@@ -400,7 +513,7 @@ def render_pillow(
         draw.rectangle(
             (inset, inset, img.width - inset - 1, img.height - inset - 1),
             outline=theme.accent,
-            width=max(1, int(2 * s)),
+            width=bw,
         )
 
     img.save(path, "PNG", compress_level=6, dpi=(144, 144))

@@ -14,7 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
-from media import BadImage, safe_unlink, save_image
+from media import MAX_PAGE_IMAGES, BadImage, page_images, safe_unlink, save_image, set_page_images
 from models import Page
 from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
@@ -54,9 +54,16 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
     if i >= len(tpl.wizard):
         await state.set_state(NewPage.image)
         await state.update_data(image_mode="initial")
+        count = len(page_images(d.get("page_data") or {}))
         await msg.answer(
-            tr("send_image", label=tpl.image_label.lower(), max_mb=d.get("max_image_mb", 12)),
-            reply_markup=image_kb(),
+            tr(
+                "send_image",
+                label=tpl.image_label.lower(),
+                max_mb=d.get("max_image_mb", 12),
+                count=count,
+                max_count=MAX_PAGE_IMAGES,
+            ),
+            reply_markup=image_kb(count),
         )
         return
 
@@ -239,7 +246,7 @@ async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, user
     await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
 
 
-@router.callback_query(NewPage.image, F.data == "img:skip")
+@router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
 async def skip_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
     await after_image(q.message, state, db, cfg, q.from_user.id)
@@ -257,16 +264,49 @@ async def back_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -
     await ask_field(q.message, state)
 
 
+@router.callback_query(NewPage.image, F.data.startswith("img:rm:"))
+async def remove_draft_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = page_images(data)
+    i = int(q.data.rsplit(":", 1)[1])
+    if not 0 <= i < len(images):
+        return
+    old = images.pop(i)
+    set_page_images(data, images)
+    await state.update_data(page_data=data)
+    if await db.drop_unattached_media(old, q.from_user.id):
+        safe_unlink(old, cfg.work_dir, "media_")
+    await q.message.answer(
+        tr("image_removed", number=i + 1, count=len(images)),
+        reply_markup=image_kb(len(images)),
+    )
+
+
 @router.message(NewPage.image)
 async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Config) -> None:
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = page_images(data)
+    if len(images) >= MAX_PAGE_IMAGES:
+        await msg.answer(
+            tr("image_limit", max_count=MAX_PAGE_IMAGES),
+            reply_markup=image_kb(len(images)),
+        )
+        return
+
     f = msg.photo[-1] if msg.photo else msg.document
     if not f:
-        await msg.answer(tr("image_only"), reply_markup=image_kb())
+        await msg.answer(tr("image_only"), reply_markup=image_kb(len(images)))
         return
 
     size = getattr(f, "file_size", 0) or 0
     if size > cfg.max_image_mb * 1024 * 1024:
-        await msg.answer(tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"))
+        await msg.answer(
+            tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
+            reply_markup=image_kb(len(images)),
+        )
         return
 
     buf = BytesIO()
@@ -274,23 +314,24 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         await bot.download(f, destination=buf)
         info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
     except BadImage as e:
-        await msg.answer(tr("image_bad", error=str(e)), reply_markup=image_kb())
+        await msg.answer(tr("image_bad", error=str(e)), reply_markup=image_kb(len(images)))
         return
     except Exception:
         log.exception("telegram image download failed for user %s", msg.from_user.id)
-        await msg.answer(tr("image_bad", error="не удалось скачать файл"), reply_markup=image_kb())
+        await msg.answer(
+            tr("image_bad", error="не удалось скачать файл"),
+            reply_markup=image_kb(len(images)),
+        )
         return
 
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
-    d = await state.get_data()
-    data = d.get("page_data") or {}
-    old = data.get("image")
-    if old and await db.drop_unattached_media(old, msg.from_user.id):
-        safe_unlink(old, cfg.work_dir, "media_")
-    data["image"] = info.path.name
+    images.append(info.path.name)
+    set_page_images(data, images)
     await state.update_data(page_data=data)
-    await msg.answer(tr("image_saved"))
-    await after_image(msg, state, db, cfg, msg.from_user.id)
+    await msg.answer(
+        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES),
+        reply_markup=image_kb(len(images)),
+    )
 
 
 @router.callback_query(F.data.startswith("dt:"))
@@ -308,8 +349,14 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
             await state.update_data(image_mode="initial")
             tpl = get_template(d["type"])
             await q.message.answer(
-                tr("send_image", label=tpl.image_label.lower(), max_mb=cfg.max_image_mb),
-                reply_markup=image_kb(),
+                tr(
+                    "send_image",
+                    label=tpl.image_label.lower(),
+                    max_mb=cfg.max_image_mb,
+                    count=len(page_images(d.get("page_data") or {})),
+                    max_count=MAX_PAGE_IMAGES,
+                ),
+                reply_markup=image_kb(len(page_images(d.get("page_data") or {}))),
             )
         elif cur == NewPage.quick.state:
             await show_quick(q.message, state)
@@ -517,11 +564,18 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
         await q.message.answer(tr("draft_missing"))
         return
     tpl = get_template(d["type"])
+    count = len(page_images(d.get("page_data") or {}))
     await state.update_data(image_mode="draft")
     await state.set_state(NewPage.image)
     await q.message.answer(
-        tr("send_image", label=tpl.image_label.lower(), max_mb=cfg.max_image_mb),
-        reply_markup=image_kb(),
+        tr(
+            "send_image",
+            label=tpl.image_label.lower(),
+            max_mb=cfg.max_image_mb,
+            count=count,
+            max_count=MAX_PAGE_IMAGES,
+        ),
+        reply_markup=image_kb(count),
     )
 
 
@@ -537,8 +591,8 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db) -> None:
         await q.message.answer(tr("title_required"))
         return
     p = await db.save_page(p)
-    if p.data.get("image"):
-        await db.attach_media(p.data["image"], p.id, q.from_user.id)
+    for path in page_images(p.data):
+        await db.attach_media(path, p.id, q.from_user.id)
     await state.clear()
     await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id))
 

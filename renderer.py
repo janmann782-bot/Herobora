@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
+from media import page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
@@ -50,6 +51,7 @@ def image_uri(path: str | Path | None, work_dir: str | Path) -> str | None:
 def font_css() -> str:
     root = Path(__file__).resolve().parent
     fonts = (
+        ("Isaac Fill", "ISAACFONTDESCRIPTIONENGRUS-FILL_0.TTF", 400),
         ("InfoBox Sans", "DejaVuSans.ttf", 400),
         ("InfoBox Sans", "DejaVuSans-Bold.ttf", 700),
         ("InfoBox Mono", "DejaVuSansMono.ttf", 400),
@@ -161,15 +163,19 @@ def make_html(
     d = page.data
     title = d.get("title") or page.title or "Без названия"
     subtitle = d.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
-    img = image_uri(d.get("image"), work_dir)
+    images = [image_uri(x, work_dir) for x in page_images(d)]
+    images = [x for x in images if x]
     caption = d.get("image_caption", "")
     description = d.get("description", "")
 
-    hero_img = ""
-    if img:
-        hero_img = f'<figure><img src="{img}" alt=""><figcaption>{value_html(caption)}</figcaption></figure>'
-        if not caption:
-            hero_img = hero_img.replace("<figcaption></figcaption>", "")
+    gallery = ""
+    if images:
+        figures = []
+        for i, img in enumerate(images):
+            cap = f"<figcaption>{value_html(caption)}</figcaption>" if i == 0 and caption else ""
+            figures.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
+        mode = "single" if len(figures) == 1 else "multi"
+        gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
 
     subtitle_html = f'<div class="subtitle">{value_html(subtitle)}</div>' if subtitle else ""
     desc_html = ""
@@ -191,7 +197,7 @@ def make_html(
 <style>
 {font_css()}
 :root {{{vars_}}}
-* {{ box-sizing: border-box; }}
+* {{ box-sizing: border-box; box-shadow: none !important; text-shadow: none !important; }}
 html, body {{ margin: 0; padding: 0; background: var(--background); color: var(--text); }}
 body {{ padding: 26px; font-family: var(--font); font-size: 20px; line-height: 1.42; }}
 .sheet {{
@@ -207,12 +213,16 @@ header {{ padding: 24px 28px 20px; text-align: center; background: var(--panel-a
 .kind {{ color: var(--accent); font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
 h1 {{ margin: 5px 0 0; overflow-wrap: anywhere; font: 700 36px/1.16 var(--heading-font); }}
 .subtitle {{ margin-top: 9px; color: var(--text-secondary); font-size: 19px; }}
-figure {{ margin: 20px 20px 14px; }}
+.gallery {{ margin: 20px; }}
+.gallery.multi {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
+.gallery.multi figure:last-child:nth-child(odd) {{ grid-column: 1 / -1; }}
+figure {{ min-width: 0; margin: 0; }}
 figure img {{
   display: block; width: 100%; max-height: 650px; object-fit: contain;
   background: var(--panel-alt); border: var(--border-width) solid var(--image-border);
   border-radius: var(--radius);
 }}
+.gallery.multi img {{ height: 360px; }}
 figcaption {{ padding: 8px 8px 0; text-align: center; color: var(--text-secondary); font-size: 16px; }}
 section {{ margin: 0; border-top: var(--border-width) solid var(--border); }}
 section h2 {{
@@ -220,14 +230,14 @@ section h2 {{
   background: var(--section-bg); color: var(--section-text);
   font: 700 22px/1.25 var(--heading-font); letter-spacing: .01em;
 }}
-.row {{ display: grid; grid-template-columns: minmax(170px, 36%) 1fr; border-top: 1px solid color-mix(in srgb, var(--border), transparent 42%); }}
+.row {{ display: grid; grid-template-columns: minmax(170px, 36%) 1fr; border-top: var(--border-width) solid var(--border); }}
 .row:first-of-type {{ border-top: 0; }}
 .label, .value {{ padding: 11px 15px; min-width: 0; overflow-wrap: anywhere; }}
-.label {{ color: var(--text-secondary); font-weight: 650; background: var(--panel-alt); border-right: 1px solid var(--border); }}
+.label {{ color: var(--text-secondary); font-weight: 650; background: var(--panel-alt); border-right: var(--border-width) solid var(--border); }}
 .side-grid {{ display: grid; grid-template-columns: 1fr 1fr; }}
 .side-col {{ min-width: 0; padding: 13px 16px 15px; overflow-wrap: anywhere; }}
-.side-col + .side-col {{ border-left: 1px solid var(--border); }}
-.side-item + .side-item {{ margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }}
+.side-col + .side-col {{ border-left: var(--border-width) solid var(--border); }}
+.side-item + .side-item {{ margin-top: 12px; padding-top: 10px; border-top: var(--border-width) solid var(--border); }}
 .side-label {{ margin-bottom: 3px; color: var(--text-secondary); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
 .footer {{ padding: 12px 18px; text-align: right; color: var(--text-secondary); background: var(--panel-alt); border-top: var(--border-width) solid var(--border); font-size: 13px; letter-spacing: .04em; }}
@@ -236,7 +246,7 @@ section h2 {{
 <body>
 <article class="sheet" id="infobox">
   <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
-  {hero_img}
+  {gallery}
   {body}
   {footer}
 </article>
@@ -261,7 +271,6 @@ async def render_page(
     if path.parent != root:
         raise ValueError("PNG можно сохранять только в рабочую директорию бота.")
 
-    markup = make_html(page, get_theme(page.theme), root, watermark)
     scale = QUALITY_SCALE.get(quality, QUALITY_SCALE["high"])
 
     try:
@@ -273,6 +282,7 @@ async def render_page(
                 args=["--disable-dev-shm-usage"],
             )
             try:
+                markup = make_html(page, get_theme(page.theme), root, watermark)
                 ctx = await browser.new_context(
                     viewport={"width": 880, "height": 900},
                     device_scale_factor=scale,

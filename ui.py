@@ -64,13 +64,25 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
     )
 
 
-def image_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [ib("⬅️ Назад", "img:back"), ib("⏭ Без изображения", "img:skip")],
-            [ib("❌ Отмена", "flow:cancel")],
-        ]
+def image_kb(count: int = 0) -> InlineKeyboardMarkup:
+    rows = []
+    if count:
+        rows.append([ib(f"✅ Готово · {count}", "img:done")])
+        rows.extend([ib(f"🗑 Удалить изображение {i + 1}", f"img:rm:{i}")] for i in range(count))
+    else:
+        rows.append([ib("⏭ Без изображений", "img:done")])
+    rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel")]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def page_image_kb(page_id: int, count: int) -> InlineKeyboardMarkup:
+    rows = [[ib(f"✅ Готово · {count}", f"pi:{page_id}:done")]]
+    rows.extend(
+        [ib(f"🗑 Удалить изображение {i + 1}", f"pi:{page_id}:rm:{i}")]
+        for i in range(count)
     )
+    rows.append([ib("⬅️ К странице", f"p:o:{page_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def themes_kb(prefix: str, selected: str = "") -> InlineKeyboardMarkup:
@@ -86,7 +98,7 @@ def draft_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
-            [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображение", "draft:image")],
+            [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
             [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
             [ib("📤 Экспорт PNG", "draft:export")],
             [ib("❌ Отмена", "draft:cancel")],
@@ -134,13 +146,13 @@ def fields_kb(tpl: Template, data: dict, page_id: int | None = None) -> InlineKe
     if page_id is None:
         rows += [
             [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
-            [ib("🖼 Изображение", "draft:image")],
+            [ib("🖼 Изображения", "draft:image")],
             [ib("⬅️ К предпросмотру", "draft:back")],
         ]
     else:
         rows += [
             [ib("➕ Свое поле", f"pa:{page_id}:custom"), ib("🧩 Свой раздел", f"pa:{page_id}:section")],
-            [ib("🖼 Изображение", f"pa:{page_id}:image")],
+            [ib("🖼 Изображения", f"pa:{page_id}:image")],
             [ib("⬅️ К странице", f"p:o:{page_id}")],
         ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

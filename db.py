@@ -273,6 +273,29 @@ class Db:
             )
         return bool(cur.rowcount)
 
+    async def drop_media_if_unused(self, path: str, owner_id: int) -> bool:
+        return await asyncio.to_thread(self._drop_media_if_unused, path, owner_id)
+
+    def _drop_media_if_unused(self, path: str, owner_id: int) -> bool:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT data FROM pages WHERE owner_id = ?",
+                (owner_id,),
+            ).fetchall()
+            for row in rows:
+                try:
+                    d = json.loads(row["data"])
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                images = d.get("images") or []
+                if d.get("image") == path or path in images:
+                    return False
+            conn.execute(
+                "DELETE FROM uploaded_media WHERE path = ? AND owner_id = ?",
+                (path, owner_id),
+            )
+        return True
+
     async def get_settings(self, user_id: int) -> UserSettings:
         return await asyncio.to_thread(self._get_settings, user_id)
 
