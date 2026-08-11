@@ -61,8 +61,8 @@ LIGHT = Theme(
     section_bg="#dce8f4",
     section_text="#1f2d3d",
     link="#3366cc",
-    font="'InfoBox Sans', Arial, sans-serif",
-    heading_font="'InfoBox Sans', Arial, sans-serif",
+    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
+    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
     radius=5,
 )
 
@@ -80,8 +80,8 @@ DARK = Theme(
     section_bg="#293747",
     section_text="#f3f6fa",
     link="#8ab4f8",
-    font="'InfoBox Sans', Arial, sans-serif",
-    heading_font="'InfoBox Sans', Arial, sans-serif",
+    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
+    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
     radius=5,
     image_border="#5d6976",
 )
@@ -106,7 +106,6 @@ AURELIA = Theme(
     radius=0,
     pixel_border=False,
     image_border="#a9f38f",
-    row_alt="#132a18",
 )
 
 

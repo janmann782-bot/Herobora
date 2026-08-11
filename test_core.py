@@ -12,6 +12,7 @@ from PIL import Image
 from db import Db
 from media import (
     BadImage,
+    battle_image_groups,
     image_caption,
     page_images,
     save_image,
@@ -41,7 +42,9 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(aurelia.border_width, 3)
         self.assertFalse(aurelia.pixel_border)
         self.assertIn("Isaac Fill", aurelia.font)
-        self.assertEqual(aurelia.row_alt, "#132a18")
+        self.assertIsNone(aurelia.row_alt)
+        self.assertIn("Wikipedia Sans", get_theme("light").font)
+        self.assertIn("Wikipedia Serif", get_theme("light").heading_font)
         self.assertEqual(get_theme("nope").key, "light")
 
     def test_fast_parser_is_not_strict_about_separators(self):
@@ -116,7 +119,7 @@ class TemplateTests(unittest.TestCase):
         )
         html = make_html(p)
         self.assertIn('data-theme="aurelia"', html)
-        self.assertIn("--row-alt:#132a18", html)
+        self.assertIn("--row-alt:#000000", html)
         self.assertIn('row.row-alt', html)
         self.assertEqual(html.count('class="row row-alt"'), 1)
 
@@ -260,6 +263,24 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         set_page_images(d, ["media_two.webp"])
         self.assertEqual(image_caption(d, "media_two.webp", 0), "Второе изображение")
         self.assertNotIn("media_one.webp", d["image_captions"])
+
+
+    def test_battle_image_groups_support_multiple_flags(self):
+        d = {
+            "images": ["m1.webp", "f1.webp", "f2.webp", "f3.webp", "x1.webp"],
+            "image_captions": {
+                "m1.webp": "main: Главное изображение",
+                "f1.webp": "s1: Флаг 1",
+                "f2.webp": "s1: Флаг 2",
+                "f3.webp": "s2: Флаг 3",
+                "x1.webp": "extra: Доп",
+            },
+        }
+        main, side1, side2, extras = battle_image_groups(d)
+        self.assertEqual(main, ("m1.webp", "Главное изображение"))
+        self.assertEqual(side1, [("f1.webp", "Флаг 1"), ("f2.webp", "Флаг 2")])
+        self.assertEqual(side2, [("f3.webp", "Флаг 3")])
+        self.assertEqual(extras, [("x1.webp", "Доп")])
 
     async def test_image_is_checked_and_gets_random_name(self):
         with tempfile.TemporaryDirectory() as tmp:

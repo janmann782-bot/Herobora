@@ -13,6 +13,83 @@ Image.MAX_IMAGE_PIXELS = 40_000_000
 MAX_PAGE_IMAGES = 10
 
 
+ROLE_MARKERS = {
+    "main": ("main", "main:", "главное", "главное:", "битва", "битва:", "image", "image:"),
+    "side1": ("s1", "s1:", "side1", "side1:", "side 1", "side 1:", "ст1", "ст1:", "сторона1", "сторона1:", "сторона 1", "сторона 1:"),
+    "side2": ("s2", "s2:", "side2", "side2:", "side 2", "side 2:", "ст2", "ст2:", "сторона2", "сторона2:", "сторона 2", "сторона 2:"),
+    "extra": ("extra", "extra:", "доп", "доп:", "галерея", "галерея:")
+}
+
+
+def _norm_caption_marker(value: str) -> str:
+    return value.casefold().replace("ё", "е").strip()
+
+
+def split_image_role(caption: str | None) -> tuple[str | None, str]:
+    text = str(caption or "").strip()
+    if not text:
+        return None, ""
+
+    low = _norm_caption_marker(text)
+    for role, markers in ROLE_MARKERS.items():
+        for marker in markers:
+            m = _norm_caption_marker(marker)
+            if low == m:
+                return role, ""
+            if low.startswith(m):
+                rest = text[len(marker):].lstrip(" :-—–|")
+                return role, rest
+    return None, text
+
+
+def battle_image_groups(data: dict) -> tuple[tuple[str, str] | None, list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    items = []
+    tagged = False
+    for i, path in enumerate(page_images(data)):
+        caption = image_caption(data, path, i)
+        role, clean_caption = split_image_role(caption)
+        if role:
+            tagged = True
+        items.append((role, path, clean_caption))
+
+    if not items:
+        return None, [], [], []
+
+    if not tagged:
+        main = (items[0][1], items[0][2])
+        side1 = [(items[1][1], items[1][2])] if len(items) > 1 else []
+        side2 = [(items[2][1], items[2][2])] if len(items) > 2 else []
+        extras = [(path, cap) for _, path, cap in items[3:]]
+        return main, side1, side2, extras
+
+    main = None
+    side1: list[tuple[str, str]] = []
+    side2: list[tuple[str, str]] = []
+    extras: list[tuple[str, str]] = []
+    untagged: list[tuple[str, str]] = []
+
+    for role, path, cap in items:
+        item = (path, cap)
+        if role == "main":
+            if main is None:
+                main = item
+            else:
+                extras.append(item)
+        elif role == "side1":
+            side1.append(item)
+        elif role == "side2":
+            side2.append(item)
+        elif role == "extra":
+            extras.append(item)
+        else:
+            untagged.append(item)
+
+    if main is None and untagged:
+        main = untagged.pop(0)
+    extras.extend(untagged)
+    return main, side1, side2, extras
+
+
 class BadImage(ValueError):
     """Ожидаемая ошибка в загруженном пользователем изображении."""
 

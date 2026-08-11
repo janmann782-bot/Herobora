@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from media import image_caption, page_images
+from media import battle_image_groups, image_caption, page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
@@ -16,21 +16,24 @@ PILLOW_SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
     here = Path(__file__).resolve().parent
     if theme.key == "aurelia":
-        fallback_name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
+        fallback_name = "LiberationMono-Bold.ttf" if bold else "LiberationMono-Regular.ttf"
         fallback = _load_font(here, fallback_name, size)
         isaac = here / "ISAACFONTDESCRIPTIONENGRUS-FILL_0.TTF"
         if isaac.is_file():
             return ImageFont.truetype(str(isaac), size), fallback
         return fallback
 
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    if heading:
+        name = "LiberationSerif-Bold.ttf" if bold else "LiberationSerif-Regular.ttf"
+    else:
+        name = "LiberationSans-Bold.ttf" if bold else "LiberationSans-Regular.ttf"
     return _load_font(here, name, size)
 
 
 def _load_font(here: Path, name: str, size: int):
     paths = [
         here / name,
-        Path("/usr/share/fonts/truetype/dejavu") / name,
+        Path("/usr/share/fonts/truetype/liberation") / name,
         Path("/usr/local/share/fonts") / name,
         Path("C:/Windows/Fonts") / name,
     ]
@@ -311,6 +314,165 @@ def _gallery(
     return img
 
 
+def _battle_media_items(data: dict, root: Path):
+    main_item, side1_items, side2_items, extra_items = battle_image_groups(data)
+
+    def resolve(item):
+        if not item:
+            return None
+        path = _media_path(item[0], root)
+        if not path:
+            return None
+        return path, item[1]
+
+    def resolve_list(items):
+        out = []
+        for path, caption in items:
+            p = _media_path(path, root)
+            if p:
+                out.append((p, caption))
+        return out
+
+    return resolve(main_item), resolve_list(side1_items), resolve_list(side2_items), resolve_list(extra_items)
+
+
+def _flag_thumb(path: Path, size: tuple[int, int], bg: str):
+    try:
+        src = ImageOps.exif_transpose(Image.open(path))
+        src.load()
+    except Exception:
+        return None
+    src = src.convert('RGB')
+    src = ImageOps.fit(src, size, Image.Resampling.LANCZOS)
+    base = Image.new('RGB', size, bg)
+    base.paste(src, (0, 0))
+    return base
+
+
+def _battle_side_cells(w: int, s: float, left: object, right: object, theme: Theme, flags1: list[tuple[Path, str]], flags2: list[tuple[Path, str]]) -> Image.Image:
+    col_w = w // 2
+    pad_x = int(16 * s)
+    pad_y = int(12 * s)
+    gap = int(6 * s)
+    font = _font(theme, max(16, int(22 * s)), bold=True)
+    tmp = ImageDraw.Draw(Image.new('RGB', (1,1)))
+    lh = _line_h(tmp, font)
+    flag_size = (max(22, int(34 * s)), max(14, int(22 * s)))
+
+    def prep(value, flags):
+        text = value if value not in (None, '', []) else '—'
+        lines = _wrap(tmp, text, font, col_w - pad_x * 2)
+        thumbs = [img for path, _ in flags if (img := _flag_thumb(path, flag_size, theme.panel_alt)) is not None]
+        flags_h = 0
+        row_width = 0
+        if thumbs:
+            x = 0
+            rows = 1
+            for thumb in thumbs:
+                if x and x + gap + thumb.width > col_w - pad_x * 2:
+                    rows += 1
+                    x = thumb.width
+                else:
+                    x = thumb.width if x == 0 else x + gap + thumb.width
+                row_width = max(row_width, x)
+            flags_h = rows * flag_size[1] + (rows - 1) * gap
+        text_h = len(lines) * lh
+        total_h = flags_h + (gap if thumbs and lines else 0) + text_h
+        return lines, thumbs, total_h
+
+    l_lines, l_thumbs, l_h = prep(left, flags1)
+    r_lines, r_thumbs, r_h = prep(right, flags2)
+    h = max(l_h, r_h) + pad_y * 2
+    img = Image.new('RGB', (w, h), theme.panel)
+    draw = ImageDraw.Draw(img)
+    bw = max(1, int(theme.border_width * s))
+    draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
+
+    def draw_block(x0, lines, thumbs, total_h):
+        y = (h - total_h) // 2
+        if thumbs:
+            row = []
+            row_w = 0
+            rows = []
+            for thumb in thumbs:
+                new_w = thumb.width if not row else row_w + gap + thumb.width
+                if row and new_w > col_w - pad_x * 2:
+                    rows.append((row, row_w))
+                    row = [thumb]
+                    row_w = thumb.width
+                else:
+                    row.append(thumb)
+                    row_w = new_w
+            if row:
+                rows.append((row, row_w))
+            for row, row_w in rows:
+                x = x0 + (col_w - row_w) // 2
+                for thumb in row:
+                    img.paste(thumb, (x, y))
+                    draw.rectangle((x, y, x + thumb.width - 1, y + thumb.height - 1), outline=theme.image_border, width=1)
+                    x += thumb.width + gap
+                y += flag_size[1] + gap
+            if lines:
+                y -= gap
+        _draw_lines(draw, lines, (x0 + pad_x, y), font, theme.text, lh, col_w - pad_x * 2, 'center')
+
+    draw_block(0, l_lines, l_thumbs, l_h)
+    draw_block(col_w, r_lines, r_thumbs, r_h)
+    return img
+
+
+def _battle_text_cells(w: int, s: float, left: object, right: object, theme: Theme) -> Image.Image:
+    col_w = w // 2
+    pad_x = int(16 * s)
+    pad_y = int(12 * s)
+    font = _font(theme, max(16, int(20 * s)))
+    tmp = ImageDraw.Draw(Image.new('RGB', (1,1)))
+    lh = _line_h(tmp, font)
+    left_text = left if left not in (None, '', []) else '—'
+    right_text = right if right not in (None, '', []) else '—'
+    left_lines = _wrap(tmp, left_text, font, col_w - pad_x * 2)
+    right_lines = _wrap(tmp, right_text, font, col_w - pad_x * 2)
+    h = max(len(left_lines) * lh, len(right_lines) * lh) + pad_y * 2
+    img = Image.new('RGB', (w, h), theme.panel)
+    draw = ImageDraw.Draw(img)
+    bw = max(1, int(theme.border_width * s))
+    draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
+    _draw_lines(draw, left_lines, (pad_x, pad_y), font, theme.text, lh)
+    _draw_lines(draw, right_lines, (col_w + pad_x, pad_y), font, theme.text, lh)
+    return img
+
+
+def _battle_blocks(page: Page, root: Path, inner_w: int, s: float, theme: Theme):
+    d = page.data
+    blocks = []
+    main, side1_flags, side2_flags, extras = _battle_media_items(d, root)
+    if main:
+        path, caption = main
+        pic = _picture(inner_w, s, path, caption, theme)
+        if pic:
+            blocks.append(pic)
+    for label, key in (("Дата", "date"), ("Место", "place"), ("Результат", "result")):
+        if d.get(key) not in (None, '', []):
+            blocks.append(_row(inner_w, s, label, d[key], theme))
+    if d.get('side_1') not in (None, '', []) or d.get('side_2') not in (None, '', []):
+        blocks.append(_section_title(inner_w, s, 'Стороны конфликта', theme))
+        blocks.append(_battle_side_cells(inner_w, s, d.get('side_1'), d.get('side_2'), theme, side1_flags, side2_flags))
+    for title, left_key, right_key in [
+        ('Командующие и лидеры', 'commander_1', 'commander_2'),
+        ('Силы', 'strength_1', 'strength_2'),
+        ('Потери', 'losses_1', 'losses_2'),
+    ]:
+        if d.get(left_key) not in (None, '', []) or d.get(right_key) not in (None, '', []):
+            blocks.append(_section_title(inner_w, s, title, theme))
+            blocks.append(_battle_text_cells(inner_w, s, d.get(left_key), d.get(right_key), theme))
+    if extras:
+        gallery = _gallery(inner_w, s, extras, theme)
+        if gallery:
+            blocks.append(_section_title(inner_w, s, 'Дополнительные изображения', theme))
+            blocks.append(gallery)
+    return blocks
+
+
 def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     font = _font(theme, max(17, int(22 * s)), bold=True, heading=True)
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -336,7 +498,7 @@ def _row(w: int, s: float, label: object, value: object, theme: Theme, alternate
     lh1 = _line_h(tmp, label_font)
     lh2 = _line_h(tmp, value_font)
     h = max(len(left) * lh1, len(right) * lh2) + pad_y * 2
-    row_bg = theme.row_alt if theme.key == "aurelia" and alternate and theme.row_alt else theme.panel
+    row_bg = theme.panel
     img = Image.new("RGB", (w, h), row_bg)
     draw = ImageDraw.Draw(img)
     label_bg = row_bg if theme.key == "aurelia" else theme.panel_alt
@@ -465,25 +627,28 @@ def render_pillow(
     inner_w = card_w - bw * 2
     blocks = [_header(inner_w, s, tpl, page, theme)]
 
-    media = []
-    for i, value in enumerate(page_images(d)):
-        media_path = _media_path(value, root)
-        if media_path:
-            media.append((media_path, image_caption(d, value, i)))
-    if media:
-        pic = _gallery(inner_w, s, media, theme)
-        if pic:
-            blocks.append(pic)
-
     row_index = 0
-    for title, fields in _standard_groups(tpl, d):
-        blocks.append(_section_title(inner_w, s, title, theme))
-        if any(f.column for f in fields):
-            blocks.append(_side_rows(inner_w, s, fields, d, theme))
-        else:
-            for f in fields:
-                row_index += 1
-                blocks.append(_row(inner_w, s, f.label, d[f.key], theme, alternate=(row_index % 2 == 0)))
+    if tpl.key == "battle":
+        blocks.extend(_battle_blocks(page, root, inner_w, s, theme))
+    else:
+        media = []
+        for i, value in enumerate(page_images(d)):
+            media_path = _media_path(value, root)
+            if media_path:
+                media.append((media_path, image_caption(d, value, i)))
+        if media:
+            pic = _gallery(inner_w, s, media, theme)
+            if pic:
+                blocks.append(pic)
+
+        for title, fields in _standard_groups(tpl, d):
+            blocks.append(_section_title(inner_w, s, title, theme))
+            if any(f.column for f in fields):
+                blocks.append(_side_rows(inner_w, s, fields, d, theme))
+            else:
+                for f in fields:
+                    row_index += 1
+                    blocks.append(_row(inner_w, s, f.label, d[f.key], theme, alternate=(row_index % 2 == 0)))
 
     custom = [
         x
