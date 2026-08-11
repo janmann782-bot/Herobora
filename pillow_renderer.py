@@ -475,12 +475,15 @@ def render_pillow(
         if pic:
             blocks.append(pic)
 
+    row_index = 0
     for title, fields in _standard_groups(tpl, d):
         blocks.append(_section_title(inner_w, s, title, theme))
         if any(f.column for f in fields):
             blocks.append(_side_rows(inner_w, s, fields, d, theme))
         else:
-            blocks.extend(_row(inner_w, s, f.label, d[f.key], theme, alternate=(i % 2 == 1)) for i, f in enumerate(fields))
+            for f in fields:
+                row_index += 1
+                blocks.append(_row(inner_w, s, f.label, d[f.key], theme, alternate=(row_index % 2 == 0)))
 
     custom = [
         x
@@ -489,7 +492,9 @@ def render_pillow(
     ]
     if custom:
         blocks.append(_section_title(inner_w, s, "Дополнительные сведения", theme))
-        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(i % 2 == 1)) for i, x in enumerate(custom))
+        for x in custom:
+            row_index += 1
+            blocks.append(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(row_index % 2 == 0)))
 
     for sec in d.get("sections") or []:
         if not isinstance(sec, dict):
@@ -502,7 +507,9 @@ def render_pillow(
         if not rows:
             continue
         blocks.append(_section_title(inner_w, s, str(sec.get("title") or "Раздел"), theme))
-        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(i % 2 == 1)) for i, x in enumerate(rows))
+        for x in rows:
+            row_index += 1
+            blocks.append(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(row_index % 2 == 0)))
 
     if d.get("description"):
         blocks.append(_section_title(inner_w, s, "Описание", theme))

@@ -117,7 +117,8 @@ class TemplateTests(unittest.TestCase):
         html = make_html(p)
         self.assertIn('data-theme="aurelia"', html)
         self.assertIn("--row-alt:#132a18", html)
-        self.assertIn('row:nth-of-type(even)', html)
+        self.assertIn('row.row-alt', html)
+        self.assertEqual(html.count('class="row row-alt"'), 1)
 
     def test_custom_section(self):
         sec = parse_section("МАГИЯ\nОсновная школа — Некромантия\nКоличество магов: 38 000")

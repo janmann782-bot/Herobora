@@ -152,6 +152,20 @@ def standard_sections(tpl: Template, data: dict) -> str:
     return "".join(out)
 
 
+
+
+def stripe_rows(body: str) -> str:
+    """Marks every second normal field row across the whole card, not per section."""
+    marker = '<div class="row">'
+    parts = body.split(marker)
+    if len(parts) == 1:
+        return body
+    out = [parts[0]]
+    for i, part in enumerate(parts[1:], start=1):
+        cls = 'row row-alt' if i % 2 == 0 else 'row'
+        out.append(f'<div class="{cls}">' + part)
+    return ''.join(out)
+
 def make_html(
     page: Page,
     theme: Theme | None = None,
@@ -188,6 +202,7 @@ def make_html(
         )
 
     body = standard_sections(tpl, d) + custom_fields(d) + custom_sections(d) + desc_html
+    body = stripe_rows(body)
     vars_ = theme.css_vars()
     footer = '<div class="footer">INFOBOX BOT</div>' if watermark else ""
 
@@ -234,8 +249,8 @@ section h2 {{
 .label {{ color: var(--text-secondary); font-weight: 650; background: var(--panel-alt); border-right: var(--border-width) solid var(--border); }}
 .sheet[data-theme="aurelia"] section > .row .label,
 .sheet[data-theme="aurelia"] section > .row .value {{ background: var(--panel); }}
-.sheet[data-theme="aurelia"] section > .row:nth-of-type(even) .label,
-.sheet[data-theme="aurelia"] section > .row:nth-of-type(even) .value {{ background: var(--row-alt); }}
+.sheet[data-theme="aurelia"] section > .row.row-alt .label,
+.sheet[data-theme="aurelia"] section > .row.row-alt .value {{ background: var(--row-alt); }}
 .side-grid {{ display: grid; grid-template-columns: 1fr 1fr; }}
 .side-col {{ min-width: 0; padding: 13px 16px 15px; overflow-wrap: anywhere; }}
 .side-col + .side-col {{ border-left: var(--border-width) solid var(--border); }}
