@@ -27,7 +27,7 @@ RU = {
         "Изображение необязательное."
     ),
     "choose_theme": "Выбери оформление карточки.",
-    "rendering": "Собираю PNG…",
+    "rendering": "Делаем вашу картинку:\n{bar} {percent}%",
     "render_error": "Не получилось собрать PNG.\nПричина: {error}",
     "draft_caption": "Предпросмотр: {title}\nТема: {theme}",
     "saved": "Страница сохранена: {title}",
@@ -67,11 +67,13 @@ RU = {
         "Тема по умолчанию: {theme}\n"
         "Язык: {language}\n"
         "Качество PNG: {quality}\n"
-        "Формат: {format}"
+        "Формат: {format}\n"
+        "Подпись INFOBOX BOT: {watermark}"
     ),
     "settings_theme": "Выбери тему по умолчанию для новых страниц.",
     "settings_quality": "Выбери качество PNG. Чем выше качество, тем тяжелее файл.",
     "settings_saved": "Настройка сохранена.",
+    "watermark_saved": "Подпись INFOBOX BOT {state}.",
     "only_ru": "В MVP доступен русский интерфейс. Архитектура локализации уже готова к другим языкам.",
     "only_png": "В MVP доступен PNG. HTML, PDF, JPEG и WEBP можно добавить поверх текущего renderer.",
     "unexpected_error": "Что-то сломалось. Ошибка записана в журнал, попробуй еще раз.",

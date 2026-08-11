@@ -33,7 +33,9 @@ from ui import (
     image_kb,
     main_menu,
     page_actions_kb,
+    progress_text,
     quick_kb,
+    render_progress,
     send_png,
     themes_kb,
     types_kb,
@@ -96,11 +98,19 @@ async def show_preview(
 
     p = make_draft(d, user_id)
     settings = await db.get_settings(user_id)
-    wait = await msg.answer(tr("rendering"))
+    wait = await msg.answer(progress_text(8))
 
     try:
         safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-        path = await render_page(p, cfg.work_dir, settings.quality)
+        path = await render_progress(
+            wait,
+            render_page(
+                p,
+                cfg.work_dir,
+                settings.quality,
+                watermark=settings.watermark,
+            ),
+        )
         p.preview_path = path.name
         await state.update_data(preview_path=path.name)
         await state.set_state(NewPage.review)

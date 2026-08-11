@@ -4,6 +4,7 @@ import asyncio
 import base64
 import html
 import logging
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -43,6 +44,28 @@ def image_uri(path: str | Path | None, work_dir: str | Path) -> str | None:
         mime = "image/png"
     raw = base64.b64encode(p.read_bytes()).decode("ascii")
     return f"data:{mime};base64,{raw}"
+
+
+@lru_cache(maxsize=1)
+def font_css() -> str:
+    root = Path(__file__).resolve().parent
+    fonts = (
+        ("InfoBox Sans", "DejaVuSans.ttf", 400),
+        ("InfoBox Sans", "DejaVuSans-Bold.ttf", 700),
+        ("InfoBox Mono", "DejaVuSansMono.ttf", 400),
+        ("InfoBox Mono", "DejaVuSansMono-Bold.ttf", 700),
+    )
+    out = []
+    for family, name, weight in fonts:
+        p = root / name
+        if not p.is_file():
+            continue
+        raw = base64.b64encode(p.read_bytes()).decode("ascii")
+        out.append(
+            f"@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,{raw}) "
+            f"format('truetype');font-style:normal;font-weight:{weight};}}"
+        )
+    return "".join(out)
 
 
 def row(label: str, value: object) -> str:
@@ -127,7 +150,12 @@ def standard_sections(tpl: Template, data: dict) -> str:
     return "".join(out)
 
 
-def make_html(page: Page, theme: Theme | None = None, work_dir: str | Path = ".") -> str:
+def make_html(
+    page: Page,
+    theme: Theme | None = None,
+    work_dir: str | Path = ".",
+    watermark: bool = True,
+) -> str:
     tpl = get_template(page.type)
     theme = theme or get_theme(page.theme)
     d = page.data
@@ -153,13 +181,15 @@ def make_html(page: Page, theme: Theme | None = None, work_dir: str | Path = "."
 
     body = standard_sections(tpl, d) + custom_fields(d) + custom_sections(d) + desc_html
     vars_ = theme.css_vars()
+    footer = '<div class="footer">INFOBOX BOT</div>' if watermark else ""
 
     return f"""<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">
 <style>
+{font_css()}
 :root {{{vars_}}}
 * {{ box-sizing: border-box; }}
 html, body {{ margin: 0; padding: 0; background: var(--background); color: var(--text); }}
@@ -208,7 +238,7 @@ section h2 {{
   <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
   {hero_img}
   {body}
-  <div class="footer">INFOBOX BOT</div>
+  {footer}
 </article>
 </body>
 </html>"""
@@ -219,6 +249,7 @@ async def render_page(
     work_dir: str | Path = ".",
     quality: str = "high",
     output: str | Path | None = None,
+    watermark: bool = True,
 ) -> Path:
     root = Path(work_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -230,7 +261,7 @@ async def render_page(
     if path.parent != root:
         raise ValueError("PNG можно сохранять только в рабочую директорию бота.")
 
-    markup = make_html(page, get_theme(page.theme), root)
+    markup = make_html(page, get_theme(page.theme), root, watermark)
     scale = QUALITY_SCALE.get(quality, QUALITY_SCALE["high"])
 
     try:
@@ -261,7 +292,7 @@ async def render_page(
         try:
             from pillow_renderer import render_pillow
 
-            await asyncio.to_thread(render_pillow, page, root, quality, path)
+            await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
         except Exception as pillow_error:
             a = " ".join(str(chromium_error).split())[:180]
             b = " ".join(str(pillow_error).split())[:180]

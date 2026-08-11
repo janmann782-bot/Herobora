@@ -24,11 +24,11 @@ from models import Page
 from page_handlers import take_page_value
 from states import EditPage, NewPage
 from templates import COUNTRY
-from ui import draft_kb, fields_kb, page_actions_kb, settings_kb, types_kb
+from ui import draft_kb, fields_kb, page_actions_kb, progress_text, settings_kb, types_kb
 
 
 def fake_message(user_id: int = 10, text: str | None = None):
-    sent = SimpleNamespace(delete=AsyncMock())
+    sent = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
     return SimpleNamespace(
         from_user=SimpleNamespace(id=user_id, first_name="Тест", username="test"),
         text=text,
@@ -132,6 +132,12 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class KeyboardTests(unittest.TestCase):
+    def test_progress_text(self):
+        s = progress_text(31)
+        self.assertIn("31%", s)
+        self.assertIn("▓▓▓", s)
+        self.assertIn("░", s)
+
     def test_callback_data_fits_telegram_limit(self):
         data = {
             "custom_fields": [{"name": f"Поле {i}", "value": i} for i in range(20)],
@@ -160,4 +166,3 @@ class KeyboardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

@@ -75,10 +75,16 @@ class Db:
                     language TEXT NOT NULL DEFAULT 'ru',
                     quality TEXT NOT NULL DEFAULT 'high',
                     export_format TEXT NOT NULL DEFAULT 'png',
+                    watermark INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
                 """
             )
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(user_settings)")}
+            if "watermark" not in cols:
+                conn.execute(
+                    "ALTER TABLE user_settings ADD COLUMN watermark INTEGER NOT NULL DEFAULT 1"
+                )
 
     async def touch_user(self, user_id: int, first_name: str = "", username: str = "") -> None:
         await asyncio.to_thread(self._touch_user, user_id, first_name, username)
@@ -143,6 +149,21 @@ class Db:
                 (owner_id, n, x),
             ).fetchall()
         return [Page.from_row(row) for row in rows]
+
+    async def clear_previews(self, owner_id: int) -> list[str]:
+        return await asyncio.to_thread(self._clear_previews, owner_id)
+
+    def _clear_previews(self, owner_id: int) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT preview_path FROM pages WHERE owner_id = ? AND preview_path IS NOT NULL",
+                (owner_id,),
+            ).fetchall()
+            conn.execute(
+                "UPDATE pages SET preview_path = NULL WHERE owner_id = ?",
+                (owner_id,),
+            )
+        return [row["preview_path"] for row in rows]
 
     async def update_page(self, page: Page) -> bool:
         if page.id is None:
@@ -268,6 +289,7 @@ class Db:
             language=row["language"],
             quality=row["quality"],
             export_format=row["export_format"],
+            watermark=bool(row["watermark"]),
         )
 
     async def save_settings(self, s: UserSettings) -> None:
@@ -281,13 +303,14 @@ class Db:
             )
             conn.execute(
                 """
-                INSERT INTO user_settings(user_id, theme, language, quality, export_format)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO user_settings(user_id, theme, language, quality, export_format, watermark)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     theme = excluded.theme,
                     language = excluded.language,
                     quality = excluded.quality,
-                    export_format = excluded.export_format
+                    export_format = excluded.export_format,
+                    watermark = excluded.watermark
                 """,
-                (s.user_id, s.theme, s.language, s.quality, s.export_format),
+                (s.user_id, s.theme, s.language, s.quality, s.export_format, int(s.watermark)),
             )

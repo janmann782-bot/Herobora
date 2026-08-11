@@ -16,12 +16,12 @@ def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
     mono = theme.key == "aurelia"
     if mono:
         name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
-    elif heading:
-        name = "DejaVuSerif-Bold.ttf" if bold else "DejaVuSerif.ttf"
     else:
         name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
 
+    here = Path(__file__).resolve().parent
     paths = [
+        here / name,
         Path("/usr/share/fonts/truetype/dejavu") / name,
         Path("/usr/local/share/fonts") / name,
         Path("C:/Windows/Fonts") / name,
@@ -325,6 +325,7 @@ def render_pillow(
     work_dir: str | Path,
     quality: str,
     output: str | Path,
+    watermark: bool = True,
 ) -> Path:
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
@@ -375,7 +376,8 @@ def render_pillow(
     if d.get("description"):
         blocks.append(_section_title(inner_w, s, "Описание", theme))
         blocks.append(_description(inner_w, s, d["description"], theme))
-    blocks.append(_footer(inner_w, s, theme))
+    if watermark:
+        blocks.append(_footer(inner_w, s, theme))
 
     outer = int(26 * s)
     content_h = sum(x.height for x in blocks) + bw * (len(blocks) - 1)

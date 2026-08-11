@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 import tempfile
 import unittest
 from io import BytesIO
@@ -55,6 +56,7 @@ class TemplateTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", s)
         self.assertIn("&lt;script&gt;", s)
         self.assertIn("A&amp;B", s)
+        self.assertNotIn("INFOBOX BOT", make_html(p, watermark=False))
 
 
 class DbTests(unittest.IsolatedAsyncioTestCase):
@@ -95,14 +97,52 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         s = await self.db.get_settings(77)
         s.theme = "aurelia"
         s.quality = "ultra"
+        s.watermark = False
         await self.db.save_settings(s)
         saved = await self.db.get_settings(77)
         self.assertEqual((saved.theme, saved.quality), ("aurelia", "ultra"))
+        self.assertFalse(saved.watermark)
 
     async def test_only_owner_can_drop_unattached_media(self):
         await self.db.add_media(12, "media_12_random.webp", 100, 100)
         self.assertFalse(await self.db.drop_unattached_media("media_12_random.webp", 13))
         self.assertTrue(await self.db.drop_unattached_media("media_12_random.webp", 12))
+
+    async def test_watermark_change_can_clear_cached_previews(self):
+        p = await self.db.save_page(
+            Page(
+                owner_id=88,
+                type="country",
+                title="Турбания",
+                data={"title": "Турбания"},
+                preview_path="preview_old.png",
+            )
+        )
+        self.assertEqual(await self.db.clear_previews(88), ["preview_old.png"])
+        saved = await self.db.get_page(p.id, 88)
+        self.assertIsNone(saved.preview_path)
+
+
+class DbMigrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_settings_table_gets_watermark_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "old.db"
+            with sqlite3.connect(path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE user_settings (
+                        user_id INTEGER PRIMARY KEY,
+                        theme TEXT NOT NULL DEFAULT 'light',
+                        language TEXT NOT NULL DEFAULT 'ru',
+                        quality TEXT NOT NULL DEFAULT 'high',
+                        export_format TEXT NOT NULL DEFAULT 'png'
+                    )
+                    """
+                )
+            db = Db(path)
+            await db.init()
+            s = await db.get_settings(1)
+            self.assertTrue(s.watermark)
 
 
 class MediaTests(unittest.IsolatedAsyncioTestCase):
@@ -155,9 +195,14 @@ class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
             )
             path = Path(tmp) / "fallback.png"
             render_pillow(p, tmp, "standard", path)
+            clean = Path(tmp) / "fallback_clean.png"
+            render_pillow(p, tmp, "standard", clean, watermark=False)
             with Image.open(path) as img:
                 self.assertGreaterEqual(img.width, 1000)
                 self.assertGreater(img.height, 500)
+                full_h = img.height
+            with Image.open(clean) as img:
+                self.assertLess(img.height, full_h)
             self.assertGreater(path.stat().st_size, 10_000)
 
     async def test_png_render(self):

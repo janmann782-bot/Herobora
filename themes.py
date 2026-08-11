@@ -59,8 +59,8 @@ LIGHT = Theme(
     section_bg="#dce8f4",
     section_text="#1f2d3d",
     link="#3366cc",
-    font="'DejaVu Sans', Arial, sans-serif",
-    heading_font="'DejaVu Serif', Georgia, serif",
+    font="'InfoBox Sans', Arial, sans-serif",
+    heading_font="'InfoBox Sans', Arial, sans-serif",
     radius=5,
 )
 
@@ -78,8 +78,8 @@ DARK = Theme(
     section_bg="#293747",
     section_text="#f3f6fa",
     link="#8ab4f8",
-    font="'DejaVu Sans', Arial, sans-serif",
-    heading_font="'DejaVu Serif', Georgia, serif",
+    font="'InfoBox Sans', Arial, sans-serif",
+    heading_font="'InfoBox Sans', Arial, sans-serif",
     radius=5,
     image_border="#5d6976",
 )
@@ -98,8 +98,8 @@ AURELIA = Theme(
     section_bg="#102718",
     section_text="#f4fff7",
     link="#62ff9f",
-    font="'DejaVu Sans Mono', 'Liberation Mono', monospace",
-    heading_font="'DejaVu Sans Mono', 'Liberation Mono', monospace",
+    font="'InfoBox Mono', 'Liberation Mono', monospace",
+    heading_font="'InfoBox Mono', 'Liberation Mono', monospace",
     border_width=2,
     radius=0,
     pixel_border=True,
@@ -112,4 +112,3 @@ THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA)}
 
 def get_theme(key: str) -> Theme:
     return THEMES.get(key, LIGHT)
-

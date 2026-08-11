@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from pathlib import Path
+from typing import Awaitable, TypeVar
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
@@ -13,6 +16,7 @@ from aiogram.types import (
 )
 
 from models import Page
+from locales import tr
 from templates import TEMPLATES, Template
 from themes import THEMES
 
@@ -21,6 +25,7 @@ MY_PAGES = "📚 Мои страницы"
 THEMES_BTN = "🎨 Темы"
 SETTINGS = "⚙️ Настройки"
 HELP = "ℹ️ Помощь"
+T = TypeVar("T")
 
 
 def ib(text: str, data: str) -> InlineKeyboardButton:
@@ -180,11 +185,15 @@ def delete_kb(page_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def settings_kb() -> InlineKeyboardMarkup:
+def settings_kb(watermark: bool | None = None) -> InlineKeyboardMarkup:
+    mark = ""
+    if watermark is not None:
+        mark = ": вкл" if watermark else ": выкл"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ib("🎨 Тема по умолчанию", "settings:theme")],
             [ib("🖼 Качество PNG", "settings:quality")],
+            [ib(f"🏷 Подпись INFOBOX BOT{mark}", "settings:watermark")],
             [ib("🌐 Язык интерфейса", "settings:language")],
             [ib("📤 Формат экспорта", "settings:format")],
             [ib("🏠 Главное меню", "menu:home")],
@@ -200,6 +209,31 @@ def quality_kb(selected: str) -> InlineKeyboardMarkup:
     ]
     rows.append([ib("⬅️ Назад", "settings:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def progress_text(percent: int) -> str:
+    n = min(100, max(0, percent))
+    filled = min(10, max(1, round(n / 10))) if n else 0
+    bar = "▓" * filled + "░" * (10 - filled)
+    return tr("rendering", bar=bar, percent=n)
+
+
+async def render_progress(msg: Message, job: Awaitable[T]) -> T:
+    task = asyncio.create_task(job)
+    for n in (18, 31, 47, 64, 78, 89, 96):
+        try:
+            res = await asyncio.wait_for(asyncio.shield(task), timeout=0.7)
+            with suppress(TelegramBadRequest):
+                await msg.edit_text(progress_text(100))
+            return res
+        except TimeoutError:
+            with suppress(TelegramBadRequest):
+                await msg.edit_text(progress_text(n))
+
+    res = await task
+    with suppress(TelegramBadRequest):
+        await msg.edit_text(progress_text(100))
+    return res
 
 
 async def send_png(

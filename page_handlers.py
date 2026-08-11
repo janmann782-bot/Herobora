@@ -29,6 +29,8 @@ from ui import (
     main_menu,
     page_actions_kb,
     pages_kb,
+    progress_text,
+    render_progress,
     send_png,
     themes_kb,
 )
@@ -58,10 +60,18 @@ async def render_saved(
     path = valid_preview(p.preview_path, cfg)
     wait = None
     if not path:
-        wait = await msg.answer(tr("exporting") if document else tr("rendering"))
+        wait = await msg.answer(progress_text(8))
         try:
             s = await db.get_settings(p.owner_id)
-            path = await render_page(p, cfg.work_dir, s.quality)
+            path = await render_progress(
+                wait,
+                render_page(
+                    p,
+                    cfg.work_dir,
+                    s.quality,
+                    watermark=s.watermark,
+                ),
+            )
             p.preview_path = path.name
             await db.update_page(p)
         except Exception as e:

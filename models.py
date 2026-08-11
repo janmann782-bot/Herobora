@@ -40,4 +40,4 @@ class UserSettings:
     language: str = "ru"
     quality: str = "high"
     export_format: str = "png"
-
+    watermark: bool = True

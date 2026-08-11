@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, ErrorEvent, Message
 from config import Config
 from db import Db
 from locales import tr
+from media import safe_unlink
 from states import clear_flow
 from themes import THEMES, get_theme
 from ui import (
@@ -40,8 +41,9 @@ async def show_settings(msg: Message, db: Db, user_id: int) -> None:
             language="Русский",
             quality=QUALITY_NAMES.get(s.quality, s.quality),
             format=s.export_format.upper(),
+            watermark="включена" if s.watermark else "отключена",
         ),
-        reply_markup=settings_kb(),
+        reply_markup=settings_kb(s.watermark),
     )
 
 
@@ -143,6 +145,19 @@ async def save_quality(q: CallbackQuery, db: Db) -> None:
     s.quality = value
     await db.save_settings(s)
     await q.message.answer(tr("settings_saved"))
+    await show_settings(q.message, db, q.from_user.id)
+
+
+@router.callback_query(F.data == "settings:watermark")
+async def toggle_watermark(q: CallbackQuery, db: Db, cfg: Config) -> None:
+    await q.answer()
+    s = await db.get_settings(q.from_user.id)
+    s.watermark = not s.watermark
+    await db.save_settings(s)
+    for path in await db.clear_previews(q.from_user.id):
+        safe_unlink(path, cfg.work_dir, "preview_")
+    state = "включена" if s.watermark else "отключена"
+    await q.message.answer(tr("watermark_saved", state=state))
     await show_settings(q.message, db, q.from_user.id)
 
 
