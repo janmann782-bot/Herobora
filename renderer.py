@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import html
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from themes import Theme, get_theme
 
 QUALITY_SCALE = {"standard": 1.5, "high": 2.0, "ultra": 2.5}
 _render_slots = asyncio.Semaphore(2)
+log = logging.getLogger(__name__)
 
 
 def esc(x: object) -> str:
@@ -218,13 +220,6 @@ async def render_page(
     quality: str = "high",
     output: str | Path | None = None,
 ) -> Path:
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError as e:
-        raise RuntimeError(
-            "Playwright не установлен. Выполни: pip install -r requirements.txt && playwright install chromium"
-        ) from e
-
     root = Path(work_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if output:
@@ -238,25 +233,48 @@ async def render_page(
     markup = make_html(page, get_theme(page.theme), root)
     scale = QUALITY_SCALE.get(quality, QUALITY_SCALE["high"])
 
-    async with _render_slots, async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=p.chromium.executable_path,
-            args=["--disable-dev-shm-usage"],
-        )
-        try:
-            ctx = await browser.new_context(
-                viewport={"width": 880, "height": 900},
-                device_scale_factor=scale,
-                service_workers="block",
+    try:
+        from playwright.async_api import async_playwright
+
+        async with _render_slots, async_playwright() as p:
+            browser = await p.chromium.launch(
+                executable_path=p.chromium.executable_path,
+                args=["--disable-dev-shm-usage"],
             )
-            tab = await ctx.new_page()
-            await tab.set_content(markup, wait_until="load")
-            await tab.evaluate("document.fonts.ready")
-            await tab.wait_for_function("Array.from(document.images).every(x => x.complete)")
-            card = tab.locator("#infobox")
-            await card.screenshot(path=str(path), type="png", animations="disabled")
-            await ctx.close()
-        finally:
-            await browser.close()
+            try:
+                ctx = await browser.new_context(
+                    viewport={"width": 880, "height": 900},
+                    device_scale_factor=scale,
+                    service_workers="block",
+                )
+                tab = await ctx.new_page()
+                await tab.set_content(markup, wait_until="load")
+                await tab.evaluate("document.fonts.ready")
+                await tab.wait_for_function("Array.from(document.images).every(x => x.complete)")
+                card = tab.locator("#infobox")
+                await card.screenshot(path=str(path), type="png", animations="disabled")
+                await ctx.close()
+            finally:
+                await browser.close()
+    except Exception as chromium_error:
+        log.warning("Chromium renderer недоступен, использую Pillow: %s", chromium_error)
+        try:
+            from pillow_renderer import render_pillow
+
+            await asyncio.to_thread(render_pillow, page, root, quality, path)
+        except Exception as pillow_error:
+            a = " ".join(str(chromium_error).split())[:180]
+            b = " ".join(str(pillow_error).split())[:180]
+            raise RuntimeError(
+                f"Не сработали оба renderer. Chromium: {type(chromium_error).__name__}: {a}; "
+                f"Pillow: {type(pillow_error).__name__}: {b}"
+            ) from pillow_error
 
     return path
+
+
+def render_error_text(e: Exception) -> str:
+    s = " ".join(str(e).split())
+    if not s:
+        s = type(e).__name__
+    return s[:350]

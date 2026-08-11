@@ -12,6 +12,7 @@ from db import Db
 from media import BadImage, save_image
 from models import Page
 from parser import parse_section, parse_text
+from pillow_renderer import render_pillow
 from renderer import make_html, render_page
 from templates import get_template
 from themes import get_theme
@@ -134,6 +135,31 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_pillow_fallback_png(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "media_1_test.png"
+            Image.new("RGB", (640, 360), "#315caa").save(media)
+            p = Page(
+                owner_id=1,
+                type="country",
+                title="Турбания",
+                theme="aurelia",
+                data={
+                    "title": "Турбания",
+                    "capital": "Светлозорь",
+                    "population": "18 500 000",
+                    "image": media.name,
+                    "image_caption": "Главное изображение",
+                    "custom_fields": [{"name": "Военный резерв", "value": "420 000"}],
+                },
+            )
+            path = Path(tmp) / "fallback.png"
+            render_pillow(p, tmp, "standard", path)
+            with Image.open(path) as img:
+                self.assertGreaterEqual(img.width, 1000)
+                self.assertGreater(img.height, 500)
+            self.assertGreater(path.stat().st_size, 10_000)
+
     async def test_png_render(self):
         if importlib.util.find_spec("playwright") is None:
             self.skipTest("playwright не установлен")

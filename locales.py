@@ -28,7 +28,7 @@ RU = {
     ),
     "choose_theme": "Выбери оформление карточки.",
     "rendering": "Собираю PNG…",
-    "render_error": "Не получилось собрать PNG. Ошибка записана в журнал.",
+    "render_error": "Не получилось собрать PNG.\nПричина: {error}",
     "draft_caption": "Предпросмотр: {title}\nТема: {theme}",
     "saved": "Страница сохранена: {title}",
     "cancelled": "Создание отменено.",

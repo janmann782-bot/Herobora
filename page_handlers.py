@@ -17,7 +17,7 @@ from locales import tr
 from media import BadImage, safe_unlink, save_image
 from models import Page
 from parser import parse_section
-from renderer import render_page
+from renderer import render_error_text, render_page
 from states import EditPage, clear_flow
 from templates import get_template
 from themes import THEMES, get_theme
@@ -64,9 +64,9 @@ async def render_saved(
             path = await render_page(p, cfg.work_dir, s.quality)
             p.preview_path = path.name
             await db.update_page(p)
-        except Exception:
+        except Exception as e:
             log.exception("saved page render failed: page=%s user=%s", p.id, p.owner_id)
-            await msg.answer(tr("render_error"))
+            await msg.answer(tr("render_error", error=render_error_text(e)))
             return None
         finally:
             if wait:

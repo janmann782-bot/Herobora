@@ -17,7 +17,7 @@ from locales import tr
 from media import BadImage, safe_unlink, save_image
 from models import Page
 from parser import ParsedPage, parse_section, parse_text
-from renderer import render_page
+from renderer import render_error_text, render_page
 from states import NewPage, clear_flow
 from templates import get_template
 from themes import get_theme
@@ -111,9 +111,9 @@ async def show_preview(
             draft_kb(),
         )
         return p
-    except Exception:
+    except Exception as e:
         log.exception("draft render failed for user %s", user_id)
-        await msg.answer(tr("render_error"), reply_markup=draft_kb())
+        await msg.answer(tr("render_error", error=render_error_text(e)), reply_markup=draft_kb())
         return None
     finally:
         with suppress(TelegramBadRequest):
