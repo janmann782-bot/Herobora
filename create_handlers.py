@@ -29,6 +29,7 @@ from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
 from states import NewPage, clear_flow
 from templates import get_template
+from text_export import send_page_text
 from themes import get_theme
 from ui import (
     CREATE,
@@ -690,6 +691,17 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db) -> None:
     await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id))
 
 
+@router.callback_query(F.data == "draft:text")
+async def text_draft(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    p = make_draft(d, q.from_user.id)
+    await send_page_text(q.message, p, draft_kb())
+
+
 @router.callback_query(F.data == "draft:export")
 async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
@@ -716,6 +728,16 @@ async def cancel_flow(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
     await q.answer()
     await clear_flow(state, q.from_user.id, db, cfg)
     await q.message.answer(tr("cancelled"), reply_markup=main_menu())
+
+
+@router.callback_query(F.data == "quick:text")
+async def quick_text(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    await send_page_text(q.message, make_draft(d, q.from_user.id), quick_kb())
 
 
 @router.callback_query(F.data == "quick:preview")

@@ -29,7 +29,7 @@ from db import Db
 from models import Page
 from page_handlers import take_page_image_caption, take_page_value
 from states import EditPage, NewPage
-from templates import COUNTRY
+from templates import COUNTRY, REGION
 from ui import (
     draft_kb,
     fields_kb,
@@ -240,6 +240,7 @@ class KeyboardTests(unittest.TestCase):
             page_image_kb(123456789, 10),
             settings_kb(),
             fields_kb(COUNTRY, data, 123456789),
+            fields_kb(REGION, data, 123456789),
         ]
         for kb in keyboards:
             buttons = [b for row in kb.inline_keyboard for b in row]

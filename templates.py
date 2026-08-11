@@ -67,6 +67,39 @@ COUNTRY = Template(
 )
 
 
+REGION = Template(
+    key="region",
+    label="Регион",
+    emoji="🗺️",
+    image_label="Флаг, герб, карта или главное изображение региона",
+    subtitle_key="official_name",
+    wizard=("title", "region_type", "country", "administrative_center", "population", "description"),
+    fields=(
+        f("title", "Название", "Основные сведения"),
+        f("official_name", "Официальное название", "Основные сведения"),
+        f("region_type", "Тип региона", "Основные сведения"),
+        f("country", "Страна", "Принадлежность"),
+        f("parent_region", "Входит в", "Принадлежность"),
+        f("administrative_center", "Административный центр", "Административное устройство"),
+        f("largest_city", "Крупнейший город", "Административное устройство"),
+        f("administrative_divisions", "Административное деление", "Административное устройство", multiline=True),
+        f("head_of_region", "Глава региона", "Органы власти"),
+        f("legislature", "Законодательный орган", "Органы власти"),
+        f("executive_body", "Исполнительный орган", "Органы власти"),
+        f("area", "Площадь", "География"),
+        f("timezone", "Часовой пояс", "География"),
+        f("population", "Население", "Население"),
+        f("density", "Плотность населения", "Население"),
+        f("official_language", "Официальный язык", "Население"),
+        f("other_languages", "Другие языки", "Население"),
+        f("founded", "Дата образования", "История"),
+        f("region_code", "Код / аббревиатура", "Прочее"),
+        f("website", "Официальный сайт", "Прочее"),
+        f("description", "Краткое описание", "Описание", multiline=True),
+    ),
+)
+
+
 BATTLE = Template(
     key="battle",
     label="Битва",
@@ -125,7 +158,7 @@ PERSON = Template(
 )
 
 
-TEMPLATES = {x.key: x for x in (COUNTRY, BATTLE, PERSON)}
+TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON)}
 
 
 def get_template(key: str) -> Template:

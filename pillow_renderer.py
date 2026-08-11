@@ -324,7 +324,7 @@ def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     return img
 
 
-def _row(w: int, s: float, label: object, value: object, theme: Theme) -> Image.Image:
+def _row(w: int, s: float, label: object, value: object, theme: Theme, alternate: bool = False) -> Image.Image:
     label_w = int(w * 0.36)
     pad_x = int(15 * s)
     pad_y = int(11 * s)
@@ -336,9 +336,11 @@ def _row(w: int, s: float, label: object, value: object, theme: Theme) -> Image.
     lh1 = _line_h(tmp, label_font)
     lh2 = _line_h(tmp, value_font)
     h = max(len(left) * lh1, len(right) * lh2) + pad_y * 2
-    img = Image.new("RGB", (w, h), theme.panel)
+    row_bg = theme.row_alt if theme.key == "aurelia" and alternate and theme.row_alt else theme.panel
+    img = Image.new("RGB", (w, h), row_bg)
     draw = ImageDraw.Draw(img)
-    draw.rectangle((0, 0, label_w, h), fill=theme.panel_alt)
+    label_bg = row_bg if theme.key == "aurelia" else theme.panel_alt
+    draw.rectangle((0, 0, label_w, h), fill=label_bg)
     draw.line(
         (label_w, 0, label_w, h),
         fill=theme.border,
@@ -478,7 +480,7 @@ def render_pillow(
         if any(f.column for f in fields):
             blocks.append(_side_rows(inner_w, s, fields, d, theme))
         else:
-            blocks.extend(_row(inner_w, s, f.label, d[f.key], theme) for f in fields)
+            blocks.extend(_row(inner_w, s, f.label, d[f.key], theme, alternate=(i % 2 == 1)) for i, f in enumerate(fields))
 
     custom = [
         x
@@ -487,7 +489,7 @@ def render_pillow(
     ]
     if custom:
         blocks.append(_section_title(inner_w, s, "Дополнительные сведения", theme))
-        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme) for x in custom)
+        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(i % 2 == 1)) for i, x in enumerate(custom))
 
     for sec in d.get("sections") or []:
         if not isinstance(sec, dict):
@@ -500,7 +502,7 @@ def render_pillow(
         if not rows:
             continue
         blocks.append(_section_title(inner_w, s, str(sec.get("title") or "Раздел"), theme))
-        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme) for x in rows)
+        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(i % 2 == 1)) for i, x in enumerate(rows))
 
     if d.get("description"):
         blocks.append(_section_title(inner_w, s, "Описание", theme))

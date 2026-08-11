@@ -23,6 +23,7 @@ class Theme:
     radius: int = 4
     pixel_border: bool = False
     image_border: str = "#A2A9B1"
+    row_alt: str | None = None
 
     def css_vars(self) -> str:
         d = {
@@ -41,6 +42,7 @@ class Theme:
             "border-width": f"{self.border_width}px",
             "radius": f"{self.radius}px",
             "image-border": self.image_border,
+            "row-alt": self.row_alt or self.panel,
             "pixel-step": "3px" if self.pixel_border else "0px",
         }
         return ";".join(f"--{k}:{v}" for k, v in d.items())
@@ -104,6 +106,7 @@ AURELIA = Theme(
     radius=0,
     pixel_border=False,
     image_border="#a9f38f",
+    row_alt="#132a18",
 )
 
 

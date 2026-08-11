@@ -40,7 +40,7 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=HELP)],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Создать карточку или отправить быстрый текст",
+        input_field_placeholder="Создать карточку или прислать данные текстом",
     )
 
 
@@ -123,7 +123,7 @@ def draft_kb() -> InlineKeyboardMarkup:
             [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
             [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
             [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
-            [ib("📤 Экспорт PNG", "draft:export")],
+            [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
             [ib("❌ Отмена", "draft:cancel")],
         ]
     )
@@ -133,7 +133,7 @@ def quick_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ib("👁 Предпросмотр", "quick:preview"), ib("✏️ Проверить поля", "quick:fields")],
-            [ib("🎨 Выбрать тему", "quick:theme")],
+            [ib("🎨 Выбрать тему", "quick:theme"), ib("📋 Выслать текстом", "quick:text")],
             [ib("❌ Отмена", "flow:cancel")],
         ]
     )
@@ -194,7 +194,8 @@ def page_actions_kb(page_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ib("✏️ Изменить", f"p:e:{page_id}"), ib("🎨 Тема", f"p:t:{page_id}")],
-            [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📄 Копия", f"p:c:{page_id}")],
+            [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📋 Выслать текстом", f"p:txt:{page_id}")],
+            [ib("📄 Копия", f"p:c:{page_id}")],
             [ib("🗑 Удалить", f"p:d:{page_id}")],
             [ib("⬅️ Мои страницы", "pages:list")],
         ]

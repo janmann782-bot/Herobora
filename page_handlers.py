@@ -29,6 +29,7 @@ from parser import parse_section
 from renderer import render_error_text, render_page
 from states import EditPage, clear_flow
 from templates import get_template
+from text_export import send_page_text
 from themes import THEMES, get_theme
 from ui import (
     MY_PAGES,
@@ -582,6 +583,15 @@ async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
     p.preview_path = None
     await db.update_page(p)
     await render_saved(q.message, p, db, cfg)
+
+
+@router.callback_query(F.data.startswith("p:txt:"))
+async def text_page(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if p:
+        await send_page_text(q.message, p, page_actions_kb(p.id))
 
 
 @router.callback_query(F.data.startswith("p:c:"))

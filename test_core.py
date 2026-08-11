@@ -23,12 +23,15 @@ from parser import parse_section, parse_text
 from pillow_renderer import render_pillow
 from renderer import make_html, render_page
 from templates import get_template
+from text_export import page_to_text, split_text
 from themes import get_theme
 
 
 class TemplateTests(unittest.TestCase):
     def test_required_templates_and_themes_exist(self):
         self.assertEqual(get_template("country").label, "Страна")
+        self.assertEqual(get_template("region").label, "Регион")
+        self.assertEqual(get_template("region").get_field("administrative_center").label, "Административный центр")
         self.assertEqual(get_template("battle").get_field("side_2").column, 2)
         self.assertTrue(get_template("person").get_field("description").multiline)
         aurelia = get_theme("aurelia")
@@ -38,6 +41,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(aurelia.border_width, 3)
         self.assertFalse(aurelia.pixel_border)
         self.assertIn("Isaac Fill", aurelia.font)
+        self.assertEqual(aurelia.row_alt, "#132a18")
         self.assertEqual(get_theme("nope").key, "light")
 
     def test_fast_parser_is_not_strict_about_separators(self):
@@ -52,6 +56,68 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(p.data["capital"], "Норд")
         self.assertEqual(p.data["population"], "18 миллионов")
         self.assertEqual(p.data["custom_fields"][0]["name"], "Магическая мощность")
+
+    def test_region_parser(self):
+        p = parse_text(
+            """Тип: регион
+Название: Верхняя Бавария
+Страна: Германия
+Входит в: Бавария
+Административный центр: Мюнхен
+Площадь: 17 529 км²
+Население: 4 238 195"""
+        )
+        self.assertEqual(p.type, "region")
+        self.assertEqual(p.data["country"], "Германия")
+        self.assertEqual(p.data["administrative_center"], "Мюнхен")
+        self.assertEqual(p.data["parent_region"], "Бавария")
+
+    def test_region_can_be_inferred(self):
+        p = parse_text(
+            """Название: Северная область
+Страна: Турбания
+Административный центр: Лесоград
+Глава региона: Марк Светов"""
+        )
+        self.assertEqual(p.type, "region")
+
+    def test_text_export_contains_all_user_text(self):
+        page = Page(
+            owner_id=1,
+            type="region",
+            title="Лесополье",
+            data={
+                "title": "Лесополье",
+                "country": "Турбания",
+                "administrative_center": "Лесополь",
+                "custom_fields": [{"name": "Код", "value": "LP"}],
+                "sections": [{"title": "Экономика", "fields": [{"name": "Заводы", "value": "38"}]}],
+                "images": ["media_fake.webp"],
+                "image_captions": {"media_fake.webp": "Карта региона"},
+            },
+        )
+        text = page_to_text(page)
+        self.assertTrue(text.startswith("РЕГИОН\n"))
+        self.assertIn("Название: Лесополье", text)
+        self.assertIn("Страна: Турбания", text)
+        self.assertIn("Код: LP", text)
+        self.assertIn("Заводы: 38", text)
+        self.assertIn("Изображение 1: Карта региона", text)
+        self.assertNotIn("media_fake.webp", text)
+        self.assertGreater(len(split_text("x" * 9000)), 1)
+
+    def test_aurelia_html_has_alternating_row_background(self):
+        p = Page(
+            owner_id=1,
+            type="region",
+            title="Тест",
+            theme="aurelia",
+            data={"title": "Тест", "country": "Турбания", "area": "100 км²"},
+        )
+        html = make_html(p)
+        self.assertIn('data-theme="aurelia"', html)
+        self.assertIn("--row-alt:#132a18", html)
+        self.assertIn('row:nth-of-type(even)', html)
 
     def test_custom_section(self):
         sec = parse_section("МАГИЯ\nОсновная школа — Некромантия\nКоличество магов: 38 000")

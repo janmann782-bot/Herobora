@@ -232,6 +232,10 @@ section h2 {{
 .row:first-of-type {{ border-top: 0; }}
 .label, .value {{ padding: 11px 15px; min-width: 0; overflow-wrap: anywhere; }}
 .label {{ color: var(--text-secondary); font-weight: 650; background: var(--panel-alt); border-right: var(--border-width) solid var(--border); }}
+.sheet[data-theme="aurelia"] section > .row .label,
+.sheet[data-theme="aurelia"] section > .row .value {{ background: var(--panel); }}
+.sheet[data-theme="aurelia"] section > .row:nth-of-type(even) .label,
+.sheet[data-theme="aurelia"] section > .row:nth-of-type(even) .value {{ background: var(--row-alt); }}
 .side-grid {{ display: grid; grid-template-columns: 1fr 1fr; }}
 .side-col {{ min-width: 0; padding: 13px 16px 15px; overflow-wrap: anywhere; }}
 .side-col + .side-col {{ border-left: var(--border-width) solid var(--border); }}
@@ -242,7 +246,7 @@ section h2 {{
 </style>
 </head>
 <body>
-<article class="sheet" id="infobox">
+<article class="sheet" id="infobox" data-theme="{esc(theme.key)}">
   <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
   {gallery}
   {body}
