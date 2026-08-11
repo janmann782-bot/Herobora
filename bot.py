@@ -1,0 +1,22 @@
+from __future__ import annotations
+
+from aiogram import Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from config import Config
+from create_handlers import router as create_router
+from db import Db
+from handlers import on_error
+from handlers import router as common_router
+from page_handlers import router as page_router
+
+
+def make_dispatcher(db: Db, cfg: Config) -> Dispatcher:
+    dp = Dispatcher(storage=MemoryStorage())
+    dp["db"] = db
+    dp["cfg"] = cfg
+    dp.include_router(common_router)
+    dp.include_router(page_router)
+    dp.include_router(create_router)
+    dp.errors()(on_error)
+    return dp

@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+infobox.db
+media_*.webp
+preview_*.png
+demo_*.png
+InfoBox_Bot*.zip
+*.log

@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class Field:
+    key: str
+    label: str
+    section: str
+    column: int = 0
+    multiline: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Template:
+    key: str
+    label: str
+    emoji: str
+    fields: tuple[Field, ...]
+    wizard: tuple[str, ...]
+    image_label: str
+    subtitle_key: str | None = None
+
+    def get_field(self, key: str) -> Field | None:
+        return next((f for f in self.fields if f.key == key), None)
+
+
+def f(key: str, label: str, section: str, column: int = 0, multiline: bool = False) -> Field:
+    return Field(key, label, section, column, multiline)
+
+
+COUNTRY = Template(
+    key="country",
+    label="Страна",
+    emoji="🌍",
+    image_label="Флаг, герб, карта или главное изображение",
+    subtitle_key="official_name",
+    wizard=("title", "official_name", "capital", "population", "government", "description"),
+    fields=(
+        f("title", "Название", "Основные сведения"),
+        f("alt_name", "Альтернативное название", "Основные сведения"),
+        f("official_name", "Официальное название", "Основные сведения"),
+        f("motto", "Девиз", "Основные сведения"),
+        f("anthem", "Гимн", "Основные сведения"),
+        f("capital", "Столица", "География"),
+        f("largest_city", "Крупнейший город", "География"),
+        f("area", "Площадь", "География"),
+        f("timezone", "Часовой пояс", "География"),
+        f("official_language", "Официальный язык", "Население"),
+        f("other_languages", "Другие языки", "Население"),
+        f("population", "Население", "Население"),
+        f("density", "Плотность населения", "Население"),
+        f("government", "Форма правления", "Государственное устройство"),
+        f("head_of_state", "Глава государства", "Государственное устройство"),
+        f("head_of_government", "Глава правительства", "Государственное устройство"),
+        f("parliament", "Парламент", "Государственное устройство"),
+        f("ruling_party", "Правящая партия", "Государственное устройство"),
+        f("ideology", "Идеология", "Государственное устройство"),
+        f("founded", "Дата основания", "История"),
+        f("independence", "Дата независимости", "История"),
+        f("currency", "Валюта", "Прочее"),
+        f("phone_code", "Телефонный код", "Прочее"),
+        f("internet_domain", "Интернет-домен", "Прочее"),
+        f("description", "Краткое описание", "Описание", multiline=True),
+    ),
+)
+
+
+BATTLE = Template(
+    key="battle",
+    label="Битва",
+    emoji="💥",
+    image_label="Изображение битвы",
+    subtitle_key="part_of",
+    wizard=("title", "part_of", "date", "place", "result", "description"),
+    fields=(
+        f("title", "Название", "Основные сведения"),
+        f("part_of", "Часть войны", "Основные сведения"),
+        f("image_caption", "Подпись изображения", "Основные сведения"),
+        f("date", "Дата", "Основные сведения"),
+        f("place", "Место", "Основные сведения"),
+        f("result", "Результат", "Основные сведения"),
+        f("side_1", "Сторона 1", "Стороны", 1),
+        f("side_2", "Сторона 2", "Стороны", 2),
+        f("commander_1", "Командующие", "Командующие", 1, True),
+        f("commander_2", "Командующие", "Командующие", 2, True),
+        f("strength_1", "Силы", "Силы сторон", 1, True),
+        f("strength_2", "Силы", "Силы сторон", 2, True),
+        f("losses_1", "Потери", "Потери", 1, True),
+        f("losses_2", "Потери", "Потери", 2, True),
+        f("description", "Краткое описание", "Описание", multiline=True),
+    ),
+)
+
+
+PERSON = Template(
+    key="person",
+    label="Персонаж",
+    emoji="👤",
+    image_label="Портрет",
+    subtitle_key="full_name",
+    wizard=("title", "full_name", "birth_date", "position", "party", "description"),
+    fields=(
+        f("title", "Имя", "Основные сведения"),
+        f("full_name", "Полное имя", "Основные сведения"),
+        f("birth_date", "Дата рождения", "Биография"),
+        f("birth_place", "Место рождения", "Биография"),
+        f("death_date", "Дата смерти", "Биография"),
+        f("death_place", "Место смерти", "Биография"),
+        f("citizenship", "Гражданство", "Биография"),
+        f("ethnicity", "Национальность / этническая принадлежность", "Биография"),
+        f("position", "Должность", "Политическая деятельность"),
+        f("term_start", "Начало полномочий", "Политическая деятельность"),
+        f("term_end", "Конец полномочий", "Политическая деятельность"),
+        f("predecessor", "Предшественник", "Политическая деятельность"),
+        f("successor", "Преемник", "Политическая деятельность"),
+        f("party", "Партия", "Политическая деятельность"),
+        f("ideology", "Идеология", "Политическая деятельность"),
+        f("profession", "Профессия", "Личная информация"),
+        f("education", "Образование", "Личная информация"),
+        f("family", "Семья", "Личная информация", multiline=True),
+        f("description", "Краткая биография", "Описание", multiline=True),
+    ),
+)
+
+
+TEMPLATES = {x.key: x for x in (COUNTRY, BATTLE, PERSON)}
+
+
+def get_template(key: str) -> Template:
+    try:
+        return TEMPLATES[key]
+    except KeyError as e:
+        raise ValueError(f"Неизвестный шаблон: {key}") from e

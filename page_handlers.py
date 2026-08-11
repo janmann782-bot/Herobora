@@ -1,0 +1,445 @@
+from __future__ import annotations
+
+import logging
+from contextlib import suppress
+from io import BytesIO
+from pathlib import Path
+
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+
+from config import Config
+from db import Db
+from locales import tr
+from media import BadImage, safe_unlink, save_image
+from models import Page
+from parser import parse_section
+from renderer import render_page
+from states import EditPage, clear_flow
+from templates import get_template
+from themes import THEMES, get_theme
+from ui import (
+    MY_PAGES,
+    delete_kb,
+    edit_value_kb,
+    fields_kb,
+    main_menu,
+    page_actions_kb,
+    pages_kb,
+    send_png,
+    themes_kb,
+)
+
+router = Router(name="pages")
+log = logging.getLogger(__name__)
+
+
+def valid_preview(path: str | None, cfg: Config) -> Path | None:
+    if not path:
+        return None
+    root = cfg.work_dir.resolve()
+    raw = Path(path)
+    p = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
+    if p.parent != root or not p.name.startswith("preview_"):
+        return None
+    return p if p.is_file() else None
+
+
+async def render_saved(
+    msg: Message,
+    p: Page,
+    db: Db,
+    cfg: Config,
+    document: bool = False,
+) -> Path | None:
+    path = valid_preview(p.preview_path, cfg)
+    wait = None
+    if not path:
+        wait = await msg.answer(tr("exporting") if document else tr("rendering"))
+        try:
+            s = await db.get_settings(p.owner_id)
+            path = await render_page(p, cfg.work_dir, s.quality)
+            p.preview_path = path.name
+            await db.update_page(p)
+        except Exception:
+            log.exception("saved page render failed: page=%s user=%s", p.id, p.owner_id)
+            await msg.answer(tr("render_error"))
+            return None
+        finally:
+            if wait:
+                with suppress(TelegramBadRequest):
+                    await wait.delete()
+
+    caption = tr("page_caption", title=p.title, theme=get_theme(p.theme).name)
+    await send_png(msg, path, caption, None if document else page_actions_kb(p.id), document)
+    return path
+
+
+async def get_owned(q: CallbackQuery, db: Db, page_id: int) -> Page | None:
+    p = await db.get_page(page_id, q.from_user.id)
+    if not p:
+        await q.message.answer(tr("page_not_found"))
+    return p
+
+
+async def show_pages(msg: Message, db: Db, user_id: int) -> None:
+    pages = await db.get_user_pages(user_id)
+    if not pages:
+        await msg.answer(tr("pages_empty"), reply_markup=main_menu())
+        return
+    await msg.answer(tr("pages_title"), reply_markup=pages_kb(pages))
+
+
+@router.message(Command("my_pages"))
+@router.message(F.text == MY_PAGES)
+async def my_pages(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    await show_pages(msg, db, msg.from_user.id)
+
+
+@router.callback_query(F.data == "pages:list")
+async def page_list_callback(
+    q: CallbackQuery, state: FSMContext, db: Db, cfg: Config
+) -> None:
+    await q.answer()
+    await clear_flow(state, q.from_user.id, db, cfg)
+    await show_pages(q.message, db, q.from_user.id)
+
+
+@router.callback_query(F.data.startswith("p:o:"))
+async def open_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    await clear_flow(state, q.from_user.id, db, cfg)
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if p:
+        await render_saved(q.message, p, db, cfg)
+
+
+@router.callback_query(F.data.startswith("p:e:"))
+async def edit_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    await clear_flow(state, q.from_user.id, db, cfg)
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    await q.message.answer(
+        tr("fields_title"),
+        reply_markup=fields_kb(get_template(p.type), p.data, p.id),
+    )
+
+
+@router.callback_query(F.data.startswith("pe:"))
+async def choose_page_field(q: CallbackQuery, state: FSMContext, db: Db) -> None:
+    await q.answer()
+    parts = q.data.split(":")
+    if len(parts) < 4:
+        return
+    page_id = int(parts[1])
+    kind = parts[2]
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+
+    label = "Поле"
+    edit: dict = {"page_id": page_id, "edit_kind": kind}
+    if kind == "s":
+        i = int(parts[3])
+        tpl = get_template(p.type)
+        if not 0 <= i < len(tpl.fields):
+            return
+        f = tpl.fields[i]
+        edit.update(edit_key=f.key)
+        label = f.label
+    elif kind == "c":
+        i = int(parts[3])
+        items = p.data.get("custom_fields") or []
+        if not 0 <= i < len(items):
+            return
+        edit.update(edit_i=i)
+        label = items[i].get("name", "Свое поле")
+    elif kind == "h":
+        i = int(parts[3])
+        sections = p.data.get("sections") or []
+        if not 0 <= i < len(sections):
+            return
+        edit.update(edit_i=i)
+        label = "Название раздела"
+    elif kind == "x" and len(parts) == 5:
+        i, j = int(parts[3]), int(parts[4])
+        sections = p.data.get("sections") or []
+        if not 0 <= i < len(sections) or not 0 <= j < len(sections[i].get("fields") or []):
+            return
+        edit.update(edit_i=i, edit_j=j)
+        label = sections[i]["fields"][j].get("name", "Поле")
+    else:
+        return
+
+    await state.update_data(**edit)
+    await state.set_state(EditPage.value)
+    await q.message.answer(
+        tr("edit_value", label=label),
+        reply_markup=edit_value_kb(f"p:e:{page_id}", f"p:o:{page_id}"),
+    )
+
+
+async def save_and_render(msg: Message, p: Page, db: Db, cfg: Config) -> None:
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await msg.answer(tr("field_saved"))
+    await render_saved(msg, p, db, cfg)
+
+
+@router.message(EditPage.value)
+async def take_page_value(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    if not msg.text:
+        await msg.answer(tr("text_only"))
+        return
+    s = msg.text.strip()
+    if len(s) > 3800:
+        await msg.answer(tr("too_long", limit=3800))
+        return
+
+    d = await state.get_data()
+    p = await db.get_page(int(d["page_id"]), msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+
+    kind = d["edit_kind"]
+    value = "" if s == "-" else s
+    if kind == "s":
+        key = d["edit_key"]
+        if key == "title" and not value:
+            await msg.answer(tr("title_required"))
+            return
+        if value:
+            p.data[key] = value
+        else:
+            p.data.pop(key, None)
+        if key == "title":
+            p.title = value
+    elif kind == "c":
+        i = int(d["edit_i"])
+        if value:
+            p.data["custom_fields"][i]["value"] = value
+        else:
+            p.data["custom_fields"].pop(i)
+    elif kind == "h":
+        if not value:
+            await msg.answer(tr("section_title_empty"))
+            return
+        p.data["sections"][int(d["edit_i"])]["title"] = value[:120]
+    elif kind == "x":
+        i, j = int(d["edit_i"]), int(d["edit_j"])
+        if value:
+            p.data["sections"][i]["fields"][j]["value"] = value
+        else:
+            p.data["sections"][i]["fields"].pop(j)
+
+    await state.clear()
+    await save_and_render(msg, p, db, cfg)
+
+
+@router.callback_query(F.data.startswith("pa:"))
+async def page_add(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    _, raw_id, action = q.data.split(":")
+    page_id = int(raw_id)
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    await state.update_data(page_id=page_id)
+
+    if action == "custom":
+        if len(p.data.get("custom_fields") or []) >= 20:
+            await q.message.answer(tr("limit_reached"))
+            return
+        await state.set_state(EditPage.custom_name)
+        await q.message.answer(
+            tr("custom_name"),
+            reply_markup=edit_value_kb(f"p:e:{page_id}", f"p:o:{page_id}"),
+        )
+    elif action == "section":
+        if len(p.data.get("sections") or []) >= 6:
+            await q.message.answer(tr("limit_reached"))
+            return
+        await state.set_state(EditPage.section)
+        await q.message.answer(
+            tr("section_prompt"),
+            reply_markup=edit_value_kb(f"p:e:{page_id}", f"p:o:{page_id}"),
+        )
+    elif action == "image":
+        await state.set_state(EditPage.image)
+        tpl = get_template(p.type)
+        await q.message.answer(
+            tr("send_image", label=tpl.image_label.lower(), max_mb=cfg.max_image_mb),
+            reply_markup=edit_value_kb(f"p:e:{page_id}", f"p:o:{page_id}"),
+        )
+
+
+@router.message(EditPage.custom_name)
+async def page_custom_name(msg: Message, state: FSMContext) -> None:
+    if not msg.text or not msg.text.strip():
+        await msg.answer(tr("custom_name"))
+        return
+    name = msg.text.strip()[:100]
+    d = await state.get_data()
+    await state.update_data(custom_name=name)
+    await state.set_state(EditPage.custom_value)
+    await msg.answer(
+        tr("custom_value", name=name),
+        reply_markup=edit_value_kb(f"p:e:{d['page_id']}", f"p:o:{d['page_id']}"),
+    )
+
+
+@router.message(EditPage.custom_value)
+async def page_custom_value(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    if not msg.text or not msg.text.strip():
+        await msg.answer(tr("empty_value"))
+        return
+    d = await state.get_data()
+    p = await db.get_page(int(d["page_id"]), msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    p.data.setdefault("custom_fields", []).append(
+        {"name": d["custom_name"], "value": msg.text.strip()[:3800]}
+    )
+    await state.clear()
+    await save_and_render(msg, p, db, cfg)
+
+
+@router.message(EditPage.section)
+async def page_section(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    sec = parse_section(msg.text or "")
+    if not sec:
+        await msg.answer(tr("section_bad"))
+        return
+    d = await state.get_data()
+    p = await db.get_page(int(d["page_id"]), msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    total = sum(len(x.get("fields") or []) for x in p.data.get("sections") or [])
+    if total + len(sec["fields"]) > 40:
+        await msg.answer(tr("limit_reached"))
+        return
+    p.data.setdefault("sections", []).append(sec)
+    await state.clear()
+    await save_and_render(msg, p, db, cfg)
+
+
+@router.message(EditPage.image)
+async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Config) -> None:
+    f = msg.photo[-1] if msg.photo else msg.document
+    if not f:
+        await msg.answer(tr("image_only"))
+        return
+    size = getattr(f, "file_size", 0) or 0
+    if size > cfg.max_image_mb * 1024 * 1024:
+        await msg.answer(tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"))
+        return
+
+    buf = BytesIO()
+    try:
+        await bot.download(f, destination=buf)
+        info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
+    except BadImage as e:
+        await msg.answer(tr("image_bad", error=str(e)))
+        return
+    except Exception:
+        log.exception("page image download failed for user %s", msg.from_user.id)
+        await msg.answer(tr("image_bad", error="не удалось скачать файл"))
+        return
+
+    d = await state.get_data()
+    p = await db.get_page(int(d["page_id"]), msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    p.data["image"] = info.path.name
+    await db.add_media(msg.from_user.id, info.path.name, info.width, info.height, p.id)
+    await state.clear()
+    await save_and_render(msg, p, db, cfg)
+
+
+@router.callback_query(F.data.startswith("p:t:"))
+async def page_theme(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if p:
+        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme))
+
+
+@router.callback_query(F.data.startswith("pt:"))
+async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
+    await q.answer()
+    _, raw_id, theme = q.data.split(":")
+    page_id = int(raw_id)
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    if theme == "back":
+        await render_saved(q.message, p, db, cfg)
+        return
+    if theme not in THEMES:
+        return
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.theme = theme
+    p.preview_path = None
+    await db.update_page(p)
+    await render_saved(q.message, p, db, cfg)
+
+
+@router.callback_query(F.data.startswith("p:c:"))
+async def copy_page(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await db.copy_page(page_id, q.from_user.id)
+    if not p:
+        await q.message.answer(tr("page_not_found"))
+        return
+    await q.message.answer(tr("copied", title=p.title), reply_markup=page_actions_kb(p.id))
+
+
+@router.callback_query(F.data.startswith("p:x:"))
+async def export_page(q: CallbackQuery, db: Db, cfg: Config) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if p:
+        await render_saved(q.message, p, db, cfg, document=True)
+
+
+@router.callback_query(F.data.startswith("p:d:"))
+async def ask_delete(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if p:
+        await q.message.answer(tr("delete_confirm", title=p.title), reply_markup=delete_kb(page_id))
+
+
+@router.callback_query(F.data.startswith("pd:") & F.data.endswith(":yes"))
+async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    page_id = int(q.data.split(":")[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    ok = await db.delete_page(page_id, q.from_user.id)
+    if ok:
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        await state.clear()
+        await q.message.answer(tr("deleted"), reply_markup=main_menu())

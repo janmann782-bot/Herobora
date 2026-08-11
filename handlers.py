@@ -1,0 +1,173 @@
+from __future__ import annotations
+
+import logging
+
+from aiogram import F, Router
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, ErrorEvent, Message
+
+from config import Config
+from db import Db
+from locales import tr
+from states import clear_flow
+from themes import THEMES, get_theme
+from ui import (
+    CREATE,
+    HELP,
+    SETTINGS,
+    THEMES_BTN,
+    main_menu,
+    quality_kb,
+    settings_kb,
+    themes_kb,
+    types_kb,
+)
+
+router = Router(name="common")
+log = logging.getLogger(__name__)
+
+
+QUALITY_NAMES = {"standard": "обычное", "high": "высокое", "ultra": "очень высокое"}
+
+
+async def show_settings(msg: Message, db: Db, user_id: int) -> None:
+    s = await db.get_settings(user_id)
+    await msg.answer(
+        tr(
+            "settings",
+            theme=get_theme(s.theme).name,
+            language="Русский",
+            quality=QUALITY_NAMES.get(s.quality, s.quality),
+            format=s.export_format.upper(),
+        ),
+        reply_markup=settings_kb(),
+    )
+
+
+@router.message(CommandStart())
+async def start(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    await db.touch_user(
+        msg.from_user.id,
+        msg.from_user.first_name or "",
+        msg.from_user.username or "",
+    )
+    await msg.answer(tr("welcome"), reply_markup=main_menu())
+
+
+@router.message(Command("help"))
+@router.message(F.text == HELP)
+async def help_message(msg: Message) -> None:
+    await msg.answer(tr("help"), reply_markup=main_menu())
+
+
+@router.message(Command("create"))
+@router.message(F.text == CREATE)
+async def create(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    await msg.answer(tr("choose_type"), reply_markup=types_kb())
+
+
+@router.message(Command("cancel"))
+async def cancel(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    await msg.answer(tr("cancelled"), reply_markup=main_menu())
+
+
+@router.message(Command("settings"))
+@router.message(F.text == SETTINGS)
+async def settings(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    await show_settings(msg, db, msg.from_user.id)
+
+
+@router.message(Command("themes"))
+@router.message(F.text == THEMES_BTN)
+async def themes(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    await clear_flow(state, msg.from_user.id, db, cfg)
+    s = await db.get_settings(msg.from_user.id)
+    await msg.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme))
+
+
+@router.callback_query(F.data == "menu:home")
+async def home(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    await clear_flow(state, q.from_user.id, db, cfg)
+    await q.message.answer(tr("welcome"), reply_markup=main_menu())
+
+
+@router.callback_query(F.data == "settings:back")
+async def settings_back(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    await show_settings(q.message, db, q.from_user.id)
+
+
+@router.callback_query(F.data == "settings:theme")
+async def settings_theme(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    s = await db.get_settings(q.from_user.id)
+    await q.message.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme))
+
+
+@router.callback_query(F.data.startswith("st:"))
+async def save_default_theme(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    value = q.data.split(":", 1)[1]
+    if value == "back":
+        await show_settings(q.message, db, q.from_user.id)
+        return
+    if value not in THEMES:
+        return
+    s = await db.get_settings(q.from_user.id)
+    s.theme = value
+    await db.save_settings(s)
+    await q.message.answer(tr("settings_saved"))
+    await show_settings(q.message, db, q.from_user.id)
+
+
+@router.callback_query(F.data == "settings:quality")
+async def settings_quality(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    s = await db.get_settings(q.from_user.id)
+    await q.message.answer(tr("settings_quality"), reply_markup=quality_kb(s.quality))
+
+
+@router.callback_query(F.data.startswith("quality:"))
+async def save_quality(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    value = q.data.split(":", 1)[1]
+    if value not in QUALITY_NAMES:
+        return
+    s = await db.get_settings(q.from_user.id)
+    s.quality = value
+    await db.save_settings(s)
+    await q.message.answer(tr("settings_saved"))
+    await show_settings(q.message, db, q.from_user.id)
+
+
+@router.callback_query(F.data == "settings:language")
+async def language_info(q: CallbackQuery) -> None:
+    await q.answer(tr("only_ru"), show_alert=True)
+
+
+@router.callback_query(F.data == "settings:format")
+async def format_info(q: CallbackQuery) -> None:
+    await q.answer(tr("only_png"), show_alert=True)
+
+
+async def on_error(event: ErrorEvent) -> bool:
+    e = event.exception
+    log.error(
+        "unhandled update error",
+        exc_info=(type(e), e, e.__traceback__),
+    )
+    msg = event.update.message
+    if not msg and event.update.callback_query:
+        msg = event.update.callback_query.message
+    if msg:
+        try:
+            await msg.answer(tr("unexpected_error"), reply_markup=main_menu())
+        except Exception:
+            log.exception("could not report error to telegram")
+    return True

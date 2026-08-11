@@ -1,0 +1,4 @@
+aiogram>=3.30,<4
+Pillow>=11.2,<13
+playwright>=1.54,<2
+
