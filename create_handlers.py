@@ -14,25 +14,24 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
+from log_sink import send_created_page_log
 from media import (
     MAX_PAGE_IMAGES,
-    MAX_SIDE_MEMBERS,
     BadImage,
-    battle_sides,
     image_caption,
-    page_media,
     page_images,
     safe_unlink,
     save_image,
     set_image_caption,
-    set_battle_sides,
     set_page_images,
 )
 from models import Page
 from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
 from states import NewPage, clear_flow
+from stats import spawn_milestone_broadcast
 from templates import get_template
+from text_export import send_page_text
 from themes import get_theme
 from ui import (
     CREATE,
@@ -40,7 +39,6 @@ from ui import (
     MY_PAGES,
     SETTINGS,
     THEMES_BTN,
-    battle_sides_kb,
     draft_kb,
     edit_value_kb,
     fields_kb,
@@ -52,7 +50,6 @@ from ui import (
     quick_kb,
     render_progress,
     send_png,
-    side_flag_kb,
     themes_kb,
     types_kb,
     wizard_kb,
@@ -112,7 +109,8 @@ async def show_preview(
     state: FSMContext,
     db: Db,
     cfg: Config,
-    user_id: int,
+    bot: Bot,
+    user,
 ) -> Page | None:
     d = await state.get_data()
     if not d.get("type"):
@@ -120,6 +118,7 @@ async def show_preview(
         await state.clear()
         return None
 
+    user_id = user.id
     p = make_draft(d, user_id)
     settings = await db.get_settings(user_id)
     wait = await msg.answer(progress_text(8))
@@ -137,6 +136,15 @@ async def show_preview(
         )
         p.preview_path = path.name
         await state.update_data(preview_path=path.name)
+
+        # Новая карточка считается один раз при первом успешном рендере.
+        # Сохранение не требуется, а повторные предпросмотры этот счётчик не крутят.
+        if not d.get("generation_counted"):
+            _, _, milestone = await db.count_generation(user_id)
+            await state.update_data(generation_counted=True)
+            if milestone is not None:
+                spawn_milestone_broadcast(bot, db, milestone)
+
         await state.set_state(NewPage.review)
         await send_png(
             msg,
@@ -144,13 +152,20 @@ async def show_preview(
             tr("draft_caption", title=p.title, theme=get_theme(p.theme).name),
             draft_kb(p.type),
         )
+
+        # В лог-группу отправляем именно в момент первого реального рендера
+        # карточки, а не при сохранении страницы. Повторные предпросмотры
+        # этого же черновика лог не засоряют.
+        if not d.get("creation_log_sent"):
+            sent = await send_created_page_log(
+                bot, cfg, db, p, user, preview_path=path, stage="render"
+            )
+            if sent:
+                await state.update_data(creation_log_sent=True)
         return p
     except Exception as e:
         log.exception("draft render failed for user %s", user_id)
-        await msg.answer(
-            tr("render_error", error=render_error_text(e)),
-            reply_markup=draft_kb(p.type),
-        )
+        await msg.answer(tr("render_error", error=render_error_text(e)), reply_markup=draft_kb((d.get("type") or "")))
         return None
     finally:
         with suppress(TelegramBadRequest):
@@ -176,22 +191,6 @@ async def show_quick(msg: Message, state: FSMContext) -> None:
     await msg.answer(d.get("quick_text", tr("draft_missing")), reply_markup=quick_kb())
 
 
-async def show_draft_sides(msg: Message, state: FSMContext) -> None:
-    d = await state.get_data()
-    if d.get("type") != "battle":
-        await msg.answer(tr("battle_only"))
-        return
-    data = d.get("page_data") or {}
-    sides = battle_sides(data)
-    set_battle_sides(data, sides)
-    await state.update_data(page_data=data)
-    await state.set_state(NewPage.review)
-    await msg.answer(
-        tr("sides_title", side_1=len(sides[0]), side_2=len(sides[1])),
-        reply_markup=battle_sides_kb(data),
-    )
-
-
 @router.callback_query(F.data.startswith("new:"))
 async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
@@ -210,6 +209,8 @@ async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
         theme=s.theme,
         preview_path=None,
         max_image_mb=cfg.max_image_mb,
+        creation_log_sent=False,
+        generation_counted=False,
     )
     await state.set_state(NewPage.field)
     await ask_field(q.message, state)
@@ -267,33 +268,33 @@ async def back_field(q: CallbackQuery, state: FSMContext) -> None:
     i = int(d.get("i", 0))
     if i <= 0:
         await state.clear()
-        await q.message.answer(tr("choose_type"), reply_markup=types_kb())
+        await q.message.answer(tr("choose_type"), reply_markup=types_kb(), parse_mode="HTML")
         return
     await state.update_data(i=i - 1)
     await ask_field(q.message, state)
 
 
-async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, user_id: int) -> None:
+async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot, user) -> None:
     d = await state.get_data()
     if d.get("image_mode") == "draft":
-        await show_preview(msg, state, db, cfg, user_id)
+        await show_preview(msg, state, db, cfg, bot, user)
         return
     await state.set_state(NewPage.theme)
-    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
+    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
 
 
 @router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
-async def skip_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+async def skip_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
-    await after_image(q.message, state, db, cfg, q.from_user.id)
+    await after_image(q.message, state, db, cfg, bot, q.from_user)
 
 
 @router.callback_query(NewPage.image, F.data == "img:back")
-async def back_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+async def back_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
     d = await state.get_data()
     if d.get("image_mode") == "draft":
-        await show_preview(q.message, state, db, cfg, q.from_user.id)
+        await show_preview(q.message, state, db, cfg, bot, q.from_user)
         return
     tpl = get_template(d["type"])
     await state.update_data(i=max(0, len(tpl.wizard) - 1))
@@ -450,7 +451,7 @@ async def draft_image_caption_action(q: CallbackQuery, state: FSMContext) -> Non
 
 
 @router.callback_query(F.data.startswith("dt:"))
-async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
     value = q.data.split(":", 1)[1]
     cur = await state.get_state()
@@ -476,13 +477,13 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
         elif cur == NewPage.quick.state:
             await show_quick(q.message, state)
         else:
-            await show_preview(q.message, state, db, cfg, q.from_user.id)
+            await show_preview(q.message, state, db, cfg, bot, q.from_user)
         return
 
     if value not in {"light", "dark", "aurelia"}:
         return
     await state.update_data(theme=value)
-    await show_preview(q.message, state, db, cfg, q.from_user.id)
+    await show_preview(q.message, state, db, cfg, bot, q.from_user)
 
 
 @router.callback_query(F.data == "draft:theme")
@@ -492,7 +493,7 @@ async def choose_draft_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "draft:fields")
@@ -508,237 +509,10 @@ async def draft_fields(q: CallbackQuery, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.data == "draft:sides")
-async def draft_sides(q: CallbackQuery, state: FSMContext) -> None:
-    await q.answer()
-    await show_draft_sides(q.message, state)
-
-
-@router.callback_query(F.data.startswith("bs:"))
-async def draft_side_action(
-    q: CallbackQuery,
-    state: FSMContext,
-    db: Db,
-    cfg: Config,
-) -> None:
-    await q.answer()
-    d = await state.get_data()
-    if d.get("type") != "battle":
-        await q.message.answer(tr("battle_only"))
-        return
-    if q.data == "bs:d":
-        await show_preview(q.message, state, db, cfg, q.from_user.id)
-        return
-
-    parts = q.data.split(":")
-    if len(parts) < 3:
-        return
-    action = parts[1]
-    side_i = int(parts[2])
-    data = d.get("page_data") or {}
-    sides = battle_sides(data)
-    if side_i not in (0, 1):
-        return
-
-    if action == "a":
-        if len(sides[side_i]) >= MAX_SIDE_MEMBERS:
-            await q.message.answer(tr("side_limit", limit=MAX_SIDE_MEMBERS))
-            return
-        await state.update_data(side_i=side_i, member_i=None)
-        await state.set_state(NewPage.side_name)
-        await q.message.answer(
-            tr("side_name_prompt", side=side_i + 1),
-            reply_markup=edit_value_kb("draft:sides"),
-        )
-        return
-
-    if len(parts) != 4:
-        return
-    member_i = int(parts[3])
-    if not 0 <= member_i < len(sides[side_i]):
-        return
-
-    if action == "n":
-        await state.update_data(side_i=side_i, member_i=member_i)
-        await state.set_state(NewPage.side_name)
-        await q.message.answer(
-            tr("side_name_prompt", side=side_i + 1)
-            + "\n\n"
-            + tr("current_value", value=sides[side_i][member_i]["name"]),
-            reply_markup=edit_value_kb("draft:sides"),
-        )
-    elif action == "f":
-        member = sides[side_i][member_i]
-        await state.update_data(side_i=side_i, member_i=member_i)
-        await state.set_state(NewPage.side_flag)
-        await q.message.answer(
-            tr(
-                "side_flag_prompt",
-                name=member["name"],
-                max_mb=cfg.max_image_mb,
-            ),
-            reply_markup=side_flag_kb(bool(member.get("flag"))),
-        )
-    elif action == "r":
-        member = sides[side_i].pop(member_i)
-        old = member.get("flag")
-        set_battle_sides(data, sides)
-        safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-        await state.update_data(page_data=data, preview_path=None)
-        if old and await db.drop_unattached_media(old, q.from_user.id):
-            safe_unlink(old, cfg.work_dir, "media_")
-        await q.message.answer(tr("side_removed"))
-        await show_draft_sides(q.message, state)
-
-
-@router.message(NewPage.side_name)
-async def take_draft_side_name(msg: Message, state: FSMContext, cfg: Config) -> None:
-    if not msg.text or not msg.text.strip():
-        await msg.answer(tr("empty_value"))
-        return
-    name = " ".join(msg.text.split())
-    if len(name) > 160:
-        await msg.answer(tr("too_long", limit=160))
-        return
-
-    d = await state.get_data()
-    if d.get("type") != "battle":
-        await state.clear()
-        await msg.answer(tr("battle_only"))
-        return
-    data = d.get("page_data") or {}
-    sides = battle_sides(data)
-    side_i = int(d.get("side_i", -1))
-    member_i = d.get("member_i")
-    if side_i not in (0, 1):
-        return
-
-    if member_i is None:
-        if len(sides[side_i]) >= MAX_SIDE_MEMBERS:
-            await msg.answer(tr("side_limit", limit=MAX_SIDE_MEMBERS))
-            return
-        sides[side_i].append({"name": name, "flag": ""})
-    else:
-        member_i = int(member_i)
-        if not 0 <= member_i < len(sides[side_i]):
-            await show_draft_sides(msg, state)
-            return
-        sides[side_i][member_i]["name"] = name
-
-    set_battle_sides(data, sides)
-    safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    await state.update_data(
-        page_data=data,
-        preview_path=None,
-        side_i=None,
-        member_i=None,
-    )
-    await msg.answer(tr("side_name_saved"))
-    await show_draft_sides(msg, state)
-
-
-@router.message(NewPage.side_flag)
-async def take_draft_side_flag(
-    msg: Message,
-    state: FSMContext,
-    bot: Bot,
-    db: Db,
-    cfg: Config,
-) -> None:
-    d = await state.get_data()
-    data = d.get("page_data") or {}
-    sides = battle_sides(data)
-    side_i = int(d.get("side_i", -1))
-    member_i = int(d.get("member_i", -1))
-    if side_i not in (0, 1) or not 0 <= member_i < len(sides[side_i]):
-        await show_draft_sides(msg, state)
-        return
-
-    f = msg.photo[-1] if msg.photo else msg.document
-    if not f:
-        await msg.answer(
-            tr("image_only"),
-            reply_markup=side_flag_kb(bool(sides[side_i][member_i].get("flag"))),
-        )
-        return
-    size = getattr(f, "file_size", 0) or 0
-    if size > cfg.max_image_mb * 1024 * 1024:
-        await msg.answer(
-            tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
-            reply_markup=side_flag_kb(bool(sides[side_i][member_i].get("flag"))),
-        )
-        return
-
-    buf = BytesIO()
-    try:
-        await bot.download(f, destination=buf)
-        info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
-    except BadImage as e:
-        await msg.answer(tr("image_bad", error=str(e)))
-        return
-    except Exception:
-        log.exception("side flag download failed for user %s", msg.from_user.id)
-        await msg.answer(tr("image_bad", error="не удалось скачать файл"))
-        return
-
-    old = sides[side_i][member_i].get("flag")
-    sides[side_i][member_i]["flag"] = info.path.name
-    set_battle_sides(data, sides)
-    safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    await db.add_media(
-        msg.from_user.id,
-        info.path.name,
-        info.width,
-        info.height,
-        kind="side_flag",
-    )
-    await state.update_data(
-        page_data=data,
-        preview_path=None,
-        side_i=None,
-        member_i=None,
-    )
-    if old and await db.drop_unattached_media(old, msg.from_user.id):
-        safe_unlink(old, cfg.work_dir, "media_")
-    await msg.answer(tr("side_flag_saved"))
-    await show_draft_sides(msg, state)
-
-
-@router.callback_query(NewPage.side_flag, F.data.startswith("bf:"))
-async def draft_side_flag_action(
-    q: CallbackQuery,
-    state: FSMContext,
-    db: Db,
-    cfg: Config,
-) -> None:
-    await q.answer()
-    d = await state.get_data()
-    data = d.get("page_data") or {}
-    sides = battle_sides(data)
-    side_i = int(d.get("side_i", -1))
-    member_i = int(d.get("member_i", -1))
-    if side_i not in (0, 1) or not 0 <= member_i < len(sides[side_i]):
-        await show_draft_sides(q.message, state)
-        return
-
-    if q.data == "bf:rm":
-        old = sides[side_i][member_i].get("flag")
-        sides[side_i][member_i]["flag"] = ""
-        set_battle_sides(data, sides)
-        safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-        await state.update_data(page_data=data, preview_path=None)
-        if old and await db.drop_unattached_media(old, q.from_user.id):
-            safe_unlink(old, cfg.work_dir, "media_")
-        await q.message.answer(tr("side_flag_removed"))
-
-    await state.update_data(side_i=None, member_i=None)
-    await show_draft_sides(q.message, state)
-
-
 @router.callback_query(F.data == "draft:back")
-async def draft_back(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+async def draft_back(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
-    await show_preview(q.message, state, db, cfg, q.from_user.id)
+    await show_preview(q.message, state, db, cfg, bot, q.from_user)
 
 
 @router.callback_query(F.data.startswith("df:"))
@@ -755,7 +529,7 @@ async def edit_draft_standard(q: CallbackQuery, state: FSMContext) -> None:
     f = tpl.fields[i]
     await state.update_data(edit_kind="standard", edit_key=f.key, edit_label=f.label)
     await state.set_state(NewPage.edit_value)
-    await q.message.answer(tr("edit_value", label=f.label), reply_markup=edit_value_kb("draft:fields"))
+    await q.message.answer(tr("edit_value", label=f.label), reply_markup=edit_value_kb("draft:fields"), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("dc:"))
@@ -772,7 +546,7 @@ async def edit_draft_custom(q: CallbackQuery, state: FSMContext) -> None:
     label = items[i].get("name", "Свое поле")
     await state.update_data(edit_kind="custom", edit_i=i, edit_label=label)
     await state.set_state(NewPage.edit_value)
-    await q.message.answer(tr("edit_value", label=label), reply_markup=edit_value_kb("draft:fields"))
+    await q.message.answer(tr("edit_value", label=label), reply_markup=edit_value_kb("draft:fields"), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("dx:"))
@@ -790,11 +564,11 @@ async def edit_draft_section(q: CallbackQuery, state: FSMContext) -> None:
     label = sections[i]["fields"][j].get("name", "Поле")
     await state.update_data(edit_kind="section", edit_i=i, edit_j=j, edit_label=label)
     await state.set_state(NewPage.edit_value)
-    await q.message.answer(tr("edit_value", label=label), reply_markup=edit_value_kb("draft:fields"))
+    await q.message.answer(tr("edit_value", label=label), reply_markup=edit_value_kb("draft:fields"), parse_mode="HTML")
 
 
 @router.message(NewPage.edit_value)
-async def take_draft_edit(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+async def take_draft_edit(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     if not msg.text:
         await msg.answer(tr("text_only"))
         return
@@ -827,7 +601,7 @@ async def take_draft_edit(msg: Message, state: FSMContext, db: Db, cfg: Config) 
 
     await state.update_data(page_data=data)
     await msg.answer(tr("field_saved"))
-    await show_preview(msg, state, db, cfg, msg.from_user.id)
+    await show_preview(msg, state, db, cfg, bot, msg.from_user)
 
 
 @router.callback_query(F.data == "draft:custom")
@@ -856,7 +630,7 @@ async def draft_custom_name(msg: Message, state: FSMContext) -> None:
 
 
 @router.message(NewPage.custom_value)
-async def draft_custom_value(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+async def draft_custom_value(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     if not msg.text or not msg.text.strip():
         await msg.answer(tr("empty_value"))
         return
@@ -866,7 +640,7 @@ async def draft_custom_value(msg: Message, state: FSMContext, db: Db, cfg: Confi
     items.append({"name": d["custom_name"], "value": msg.text.strip()[:3800]})
     await state.update_data(page_data=data)
     await msg.answer(tr("custom_added"))
-    await show_preview(msg, state, db, cfg, msg.from_user.id)
+    await show_preview(msg, state, db, cfg, bot, msg.from_user)
 
 
 @router.callback_query(F.data == "draft:section")
@@ -884,7 +658,7 @@ async def add_draft_section(q: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(NewPage.section)
-async def draft_section(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+async def draft_section(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     sec = parse_section(msg.text or "")
     if not sec:
         await msg.answer(tr("section_bad"))
@@ -898,7 +672,7 @@ async def draft_section(msg: Message, state: FSMContext, db: Db, cfg: Config) ->
     data.setdefault("sections", []).append(sec)
     await state.update_data(page_data=data)
     await msg.answer(tr("section_added"))
-    await show_preview(msg, state, db, cfg, msg.from_user.id)
+    await show_preview(msg, state, db, cfg, bot, msg.from_user)
 
 
 @router.callback_query(F.data == "draft:image")
@@ -925,7 +699,7 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
 
 
 @router.callback_query(F.data == "draft:save")
-async def save_draft(q: CallbackQuery, state: FSMContext, db: Db) -> None:
+async def save_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
     d = await state.get_data()
     if not d.get("type"):
@@ -936,17 +710,25 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db) -> None:
         await q.message.answer(tr("title_required"))
         return
     p = await db.save_page(p)
-    for path in page_media(p.data):
+    for path in page_images(p.data):
         await db.attach_media(path, p.id, q.from_user.id)
     await state.clear()
-    await q.message.answer(
-        tr("saved", title=p.title),
-        reply_markup=page_actions_kb(p.id, p.type),
-    )
+    await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id, p.type))
+
+
+@router.callback_query(F.data == "draft:text")
+async def text_draft(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    p = make_draft(d, q.from_user.id)
+    await send_page_text(q.message, p, draft_kb(p.type))
 
 
 @router.callback_query(F.data == "draft:export")
-async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
     d = await state.get_data()
     if not d.get("type"):
@@ -956,7 +738,7 @@ async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config)
     raw = Path(d.get("preview_path") or "")
     path = raw.resolve() if raw.is_absolute() else (cfg.work_dir / raw).resolve()
     if path.parent != cfg.work_dir.resolve() or not path.name.startswith("preview_") or not path.is_file():
-        p = await show_preview(q.message, state, db, cfg, q.from_user.id)
+        p = await show_preview(q.message, state, db, cfg, bot, q.from_user)
         if not p:
             return
         d = await state.get_data()
@@ -973,10 +755,20 @@ async def cancel_flow(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
     await q.message.answer(tr("cancelled"), reply_markup=main_menu())
 
 
-@router.callback_query(F.data == "quick:preview")
-async def quick_preview(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+@router.callback_query(F.data == "quick:text")
+async def quick_text(q: CallbackQuery, state: FSMContext) -> None:
     await q.answer()
-    await show_preview(q.message, state, db, cfg, q.from_user.id)
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    await send_page_text(q.message, make_draft(d, q.from_user.id), quick_kb())
+
+
+@router.callback_query(F.data == "quick:preview")
+async def quick_preview(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
+    await q.answer()
+    await show_preview(q.message, state, db, cfg, bot, q.from_user)
 
 
 @router.callback_query(F.data == "quick:fields")
@@ -999,7 +791,7 @@ async def quick_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
 
 
 @router.message(StateFilter(None), F.text)
@@ -1039,5 +831,7 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
         preview_path=None,
         quick_text=quick_text,
         max_image_mb=cfg.max_image_mb,
+        creation_log_sent=False,
+        generation_counted=False,
     )
     await show_quick(msg, state)

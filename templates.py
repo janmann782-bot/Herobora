@@ -38,6 +38,7 @@ COUNTRY = Template(
     subtitle_key="official_name",
     wizard=("title", "official_name", "capital", "population", "government", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Название", "Основные сведения"),
         f("alt_name", "Альтернативное название", "Основные сведения"),
         f("official_name", "Официальное название", "Основные сведения"),
@@ -67,26 +68,61 @@ COUNTRY = Template(
 )
 
 
+REGION = Template(
+    key="region",
+    label="Регион",
+    emoji="🗺️",
+    image_label="Флаг, герб, карта или главное изображение региона",
+    subtitle_key="official_name",
+    wizard=("title", "region_type", "country", "administrative_center", "population", "description"),
+    fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
+        f("title", "Название", "Основные сведения"),
+        f("official_name", "Официальное название", "Основные сведения"),
+        f("region_type", "Тип региона", "Основные сведения"),
+        f("country", "Страна", "Принадлежность"),
+        f("parent_region", "Входит в", "Принадлежность"),
+        f("administrative_center", "Административный центр", "Административное устройство"),
+        f("largest_city", "Крупнейший город", "Административное устройство"),
+        f("administrative_divisions", "Административное деление", "Административное устройство", multiline=True),
+        f("head_of_region", "Глава региона", "Органы власти"),
+        f("legislature", "Законодательный орган", "Органы власти"),
+        f("executive_body", "Исполнительный орган", "Органы власти"),
+        f("area", "Площадь", "География"),
+        f("timezone", "Часовой пояс", "География"),
+        f("population", "Население", "Население"),
+        f("density", "Плотность населения", "Население"),
+        f("official_language", "Официальный язык", "Население"),
+        f("other_languages", "Другие языки", "Население"),
+        f("founded", "Дата образования", "История"),
+        f("region_code", "Код / аббревиатура", "Прочее"),
+        f("website", "Официальный сайт", "Прочее"),
+        f("description", "Краткое описание", "Описание", multiline=True),
+    ),
+)
+
+
 BATTLE = Template(
     key="battle",
     label="Битва",
     emoji="💥",
-    image_label="Изображение битвы",
+    image_label="главное изображение битвы и мини-флаги сторон; для флагов используй подписи s1: или s2:",
     subtitle_key="part_of",
     wizard=("title", "part_of", "date", "place", "result", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Название", "Основные сведения"),
         f("part_of", "Часть войны", "Основные сведения"),
         f("image_caption", "Подпись изображения", "Основные сведения"),
         f("date", "Дата", "Основные сведения"),
         f("place", "Место", "Основные сведения"),
         f("result", "Результат", "Основные сведения"),
-        f("side_1", "Сторона 1", "Стороны", 1),
-        f("side_2", "Сторона 2", "Стороны", 2),
-        f("commander_1", "Командующие", "Командующие", 1, True),
-        f("commander_2", "Командующие", "Командующие", 2, True),
-        f("strength_1", "Силы", "Силы сторон", 1, True),
-        f("strength_2", "Силы", "Силы сторон", 2, True),
+        f("side_1", "Сторона 1", "Стороны конфликта", 1),
+        f("side_2", "Сторона 2", "Стороны конфликта", 2),
+        f("commander_1", "Командующие", "Командующие и лидеры", 1, True),
+        f("commander_2", "Командующие", "Командующие и лидеры", 2, True),
+        f("strength_1", "Силы", "Силы", 1, True),
+        f("strength_2", "Силы", "Силы", 2, True),
         f("losses_1", "Потери", "Потери", 1, True),
         f("losses_2", "Потери", "Потери", 2, True),
         f("description", "Краткое описание", "Описание", multiline=True),
@@ -102,6 +138,7 @@ PERSON = Template(
     subtitle_key="full_name",
     wizard=("title", "full_name", "birth_date", "position", "party", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Имя", "Основные сведения"),
         f("full_name", "Полное имя", "Основные сведения"),
         f("birth_date", "Дата рождения", "Биография"),
@@ -125,7 +162,7 @@ PERSON = Template(
 )
 
 
-TEMPLATES = {x.key: x for x in (COUNTRY, BATTLE, PERSON)}
+TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON)}
 
 
 def get_template(key: str) -> Template:

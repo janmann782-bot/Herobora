@@ -23,6 +23,7 @@ class Theme:
     radius: int = 4
     pixel_border: bool = False
     image_border: str = "#A2A9B1"
+    row_alt: str | None = None
 
     def css_vars(self) -> str:
         d = {
@@ -41,6 +42,7 @@ class Theme:
             "border-width": f"{self.border_width}px",
             "radius": f"{self.radius}px",
             "image-border": self.image_border,
+            "row-alt": self.row_alt or self.panel,
             "pixel-step": "3px" if self.pixel_border else "0px",
         }
         return ";".join(f"--{k}:{v}" for k, v in d.items())
@@ -59,8 +61,8 @@ LIGHT = Theme(
     section_bg="#dce8f4",
     section_text="#1f2d3d",
     link="#3366cc",
-    font="'InfoBox Sans', Arial, sans-serif",
-    heading_font="'InfoBox Sans', Arial, sans-serif",
+    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
+    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
     radius=5,
 )
 
@@ -78,8 +80,8 @@ DARK = Theme(
     section_bg="#293747",
     section_text="#f3f6fa",
     link="#8ab4f8",
-    font="'InfoBox Sans', Arial, sans-serif",
-    heading_font="'InfoBox Sans', Arial, sans-serif",
+    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
+    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
     radius=5,
     image_border="#5d6976",
 )

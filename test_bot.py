@@ -13,8 +13,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from PIL import Image
 
 from config import Config
+from battle_handlers import battle_text_input
+from battle_sides import normalize_sides
 from create_handlers import (
-    draft_side_action,
     draft_image_caption_action,
     draft_theme,
     quick_input,
@@ -24,26 +25,24 @@ from create_handlers import (
     start_new,
     take_image,
     take_draft_image_caption,
-    take_draft_side_flag,
-    take_draft_side_name,
     take_field,
 )
 from db import Db
 from models import Page
 from page_handlers import take_page_image_caption, take_page_value
 from states import EditPage, NewPage
-from templates import COUNTRY
+from templates import COUNTRY, REGION
 from ui import (
-    battle_sides_kb,
     draft_kb,
     fields_kb,
     image_kb,
     image_caption_kb,
     page_actions_kb,
+    battle_sides_kb,
+    battle_side_edit_kb,
     page_image_kb,
     progress_text,
     settings_kb,
-    side_flag_kb,
     types_kb,
 )
 
@@ -216,50 +215,16 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved.data["image_caption"], "Новая подпись")
         self.assertEqual(await self.state.get_state(), EditPage.image.state)
 
-    async def test_draft_battle_side_editor_adds_name_and_flag(self):
-        await self.state.update_data(
-            type="battle",
-            page_data={"title": "Битва у Светлозорья"},
-            theme="aurelia",
-        )
-        msg = fake_message()
-        await draft_side_action(
-            fake_callback("bs:a:0", msg),
-            self.state,
-            self.db,
-            self.cfg,
-        )
-        self.assertEqual(await self.state.get_state(), NewPage.side_name.state)
 
-        msg.text = "Турбания"
-        await take_draft_side_name(msg, self.state, self.cfg)
+    async def test_battle_editor_data_roundtrip(self):
+        await self.state.update_data(type="battle", page_data={"title": "Битва"})
+        msg = fake_message(text="Кефирстан")
+        await self.state.set_state(NewPage.battle_text)
+        await self.state.update_data(battle_side_i=0, battle_member_i=None, battle_action="side_name", battle_page_id=None)
+        with patch("battle_handlers._show_side", AsyncMock()):
+            await battle_text_input(msg, self.state, self.db, self.cfg, False)
         d = await self.state.get_data()
-        self.assertEqual(d["page_data"]["battle_sides"][0][0]["name"], "Турбания")
-
-        await draft_side_action(
-            fake_callback("bs:f:0:0", msg),
-            self.state,
-            self.db,
-            self.cfg,
-        )
-        self.assertEqual(await self.state.get_state(), NewPage.side_flag.state)
-
-        buf = BytesIO()
-        Image.new("RGB", (90, 60), "green").save(buf, "PNG")
-        raw = buf.getvalue()
-        msg.text = None
-        msg.photo = [SimpleNamespace(file_size=len(raw))]
-
-        async def download(_, destination):
-            destination.write(raw)
-
-        bot = SimpleNamespace(download=AsyncMock(side_effect=download))
-        await take_draft_side_flag(msg, self.state, bot, self.db, self.cfg)
-        d = await self.state.get_data()
-        flag = d["page_data"]["battle_sides"][0][0]["flag"]
-        self.assertTrue(flag.startswith("media_10_"))
-        self.assertTrue((self.cfg.work_dir / flag).is_file())
-        self.assertEqual(await self.state.get_state(), NewPage.review.state)
+        self.assertEqual(d["page_data"]["side_1"], "Кефирстан")
 
 
 class KeyboardTests(unittest.TestCase):
@@ -290,19 +255,9 @@ class KeyboardTests(unittest.TestCase):
             page_image_kb(123456789, 10),
             settings_kb(),
             fields_kb(COUNTRY, data, 123456789),
-            draft_kb("battle"),
-            page_actions_kb(123456789, "battle"),
-            battle_sides_kb(
-                {
-                    "battle_sides": [
-                        [{"name": f"Участник {i}", "flag": "x"} for i in range(10)],
-                        [{"name": f"Противник {i}", "flag": ""} for i in range(10)],
-                    ]
-                },
-                123456789,
-            ),
-            side_flag_kb(True),
-            side_flag_kb(True, 123456789),
+            fields_kb(REGION, data, 123456789),
+            battle_sides_kb("p", 123456789),
+            battle_side_edit_kb("p", 0, [{"name": "Кефирстан", "flag": "media_flag.webp"}], 123456789),
         ]
         for kb in keyboards:
             buttons = [b for row in kb.inline_keyboard for b in row]

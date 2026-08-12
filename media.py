@@ -11,7 +11,83 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 Image.MAX_IMAGE_PIXELS = 40_000_000
 MAX_PAGE_IMAGES = 10
-MAX_SIDE_MEMBERS = 10
+
+
+ROLE_MARKERS = {
+    "main": ("main", "main:", "главное", "главное:", "битва", "битва:", "image", "image:"),
+    "side1": ("s1", "s1:", "side1", "side1:", "side 1", "side 1:", "ст1", "ст1:", "сторона1", "сторона1:", "сторона 1", "сторона 1:"),
+    "side2": ("s2", "s2:", "side2", "side2:", "side 2", "side 2:", "ст2", "ст2:", "сторона2", "сторона2:", "сторона 2", "сторона 2:"),
+    "extra": ("extra", "extra:", "доп", "доп:", "галерея", "галерея:")
+}
+
+
+def _norm_caption_marker(value: str) -> str:
+    return value.casefold().replace("ё", "е").strip()
+
+
+def split_image_role(caption: str | None) -> tuple[str | None, str]:
+    text = str(caption or "").strip()
+    if not text:
+        return None, ""
+
+    low = _norm_caption_marker(text)
+    for role, markers in ROLE_MARKERS.items():
+        for marker in markers:
+            m = _norm_caption_marker(marker)
+            if low == m:
+                return role, ""
+            if low.startswith(m):
+                rest = text[len(marker):].lstrip(" :-—–|")
+                return role, rest
+    return None, text
+
+
+def battle_image_groups(data: dict) -> tuple[tuple[str, str] | None, list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    items = []
+    tagged = False
+    for i, path in enumerate(page_images(data)):
+        caption = image_caption(data, path, i)
+        role, clean_caption = split_image_role(caption)
+        if role:
+            tagged = True
+        items.append((role, path, clean_caption))
+
+    if not items:
+        return None, [], [], []
+
+    if not tagged:
+        main = (items[0][1], items[0][2])
+        side1 = [(items[1][1], items[1][2])] if len(items) > 1 else []
+        side2 = [(items[2][1], items[2][2])] if len(items) > 2 else []
+        extras = [(path, cap) for _, path, cap in items[3:]]
+        return main, side1, side2, extras
+
+    main = None
+    side1: list[tuple[str, str]] = []
+    side2: list[tuple[str, str]] = []
+    extras: list[tuple[str, str]] = []
+    untagged: list[tuple[str, str]] = []
+
+    for role, path, cap in items:
+        item = (path, cap)
+        if role == "main":
+            if main is None:
+                main = item
+            else:
+                extras.append(item)
+        elif role == "side1":
+            side1.append(item)
+        elif role == "side2":
+            side2.append(item)
+        elif role == "extra":
+            extras.append(item)
+        else:
+            untagged.append(item)
+
+    if main is None and untagged:
+        main = untagged.pop(0)
+    extras.extend(untagged)
+    return main, side1, side2, extras
 
 
 class BadImage(ValueError):
@@ -35,69 +111,6 @@ def page_images(data: dict) -> list[str]:
     if isinstance(old, str) and old and old not in out:
         out.insert(0, old)
     return out[:MAX_PAGE_IMAGES]
-
-
-def battle_sides(data: dict) -> list[list[dict]]:
-    raw = data.get("battle_sides")
-    if isinstance(raw, list) and len(raw) >= 2:
-        out = []
-        for side in raw[:2]:
-            members = []
-            if isinstance(side, list):
-                for x in side[:MAX_SIDE_MEMBERS]:
-                    if not isinstance(x, dict):
-                        continue
-                    name = str(x.get("name") or "").strip()[:160]
-                    if not name:
-                        continue
-                    flag = x.get("flag")
-                    members.append(
-                        {"name": name, "flag": flag if isinstance(flag, str) else ""}
-                    )
-            out.append(members)
-        return out
-
-    out = [[], []]
-    for i, key in enumerate(("side_1", "side_2")):
-        value = data.get(key)
-        if not value:
-            continue
-        lines = [x.strip() for x in str(value).splitlines() if x.strip()]
-        out[i] = [{"name": x[:160], "flag": ""} for x in lines[:MAX_SIDE_MEMBERS]]
-    return out
-
-
-def set_battle_sides(data: dict, sides: list[list[dict]]) -> None:
-    clean = battle_sides({"battle_sides": sides})
-    if any(clean):
-        data["battle_sides"] = clean
-    else:
-        data.pop("battle_sides", None)
-
-    for key, members in zip(("side_1", "side_2"), clean):
-        names = [x["name"] for x in members]
-        if names:
-            data[key] = "\n".join(names)
-        else:
-            data.pop(key, None)
-
-
-def side_flags(data: dict) -> list[str]:
-    out = []
-    for side in battle_sides(data):
-        for x in side:
-            path = x.get("flag")
-            if isinstance(path, str) and path and path not in out:
-                out.append(path)
-    return out
-
-
-def page_media(data: dict) -> list[str]:
-    out = page_images(data)
-    for path in side_flags(data):
-        if path not in out:
-            out.append(path)
-    return out
 
 
 def image_caption(data: dict, path: str, index: int = 0) -> str:

@@ -24,6 +24,7 @@ class Config:
     db_path: Path
     log_level: str = "INFO"
     max_image_mb: int = 12
+    log_chat_id: int = -1004368904200
 
 
 def load_config(require_token: bool = True) -> Config:
@@ -46,4 +47,5 @@ def load_config(require_token: bool = True) -> Config:
         db_path=db_path,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         max_image_mb=max(1, int(os.getenv("MAX_IMAGE_MB", "12"))),
+        log_chat_id=int(os.getenv("INFOBOX_LOG_CHAT_ID", "-1004368904200")),
     )

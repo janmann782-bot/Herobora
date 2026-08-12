@@ -9,16 +9,15 @@ from pathlib import Path
 
 from PIL import Image
 
+from battle_sides import normalize_sides, save_sides
 from db import Db
 from media import (
     BadImage,
-    battle_sides,
+    battle_image_groups,
     image_caption,
-    page_media,
     page_images,
     save_image,
     set_image_caption,
-    set_battle_sides,
     set_page_images,
 )
 from models import Page
@@ -26,12 +25,15 @@ from parser import parse_section, parse_text
 from pillow_renderer import render_pillow
 from renderer import make_html, render_page
 from templates import get_template
+from text_export import page_to_text, split_text
 from themes import get_theme
 
 
 class TemplateTests(unittest.TestCase):
     def test_required_templates_and_themes_exist(self):
         self.assertEqual(get_template("country").label, "Страна")
+        self.assertEqual(get_template("region").label, "Регион")
+        self.assertEqual(get_template("region").get_field("administrative_center").label, "Административный центр")
         self.assertEqual(get_template("battle").get_field("side_2").column, 2)
         self.assertTrue(get_template("person").get_field("description").multiline)
         aurelia = get_theme("aurelia")
@@ -41,6 +43,9 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(aurelia.border_width, 3)
         self.assertFalse(aurelia.pixel_border)
         self.assertIn("Isaac Fill", aurelia.font)
+        self.assertIsNone(aurelia.row_alt)
+        self.assertIn("Wikipedia Sans", get_theme("light").font)
+        self.assertIn("Wikipedia Serif", get_theme("light").heading_font)
         self.assertEqual(get_theme("nope").key, "light")
 
     def test_fast_parser_is_not_strict_about_separators(self):
@@ -55,6 +60,69 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(p.data["capital"], "Норд")
         self.assertEqual(p.data["population"], "18 миллионов")
         self.assertEqual(p.data["custom_fields"][0]["name"], "Магическая мощность")
+
+    def test_region_parser(self):
+        p = parse_text(
+            """Тип: регион
+Название: Верхняя Бавария
+Страна: Германия
+Входит в: Бавария
+Административный центр: Мюнхен
+Площадь: 17 529 км²
+Население: 4 238 195"""
+        )
+        self.assertEqual(p.type, "region")
+        self.assertEqual(p.data["country"], "Германия")
+        self.assertEqual(p.data["administrative_center"], "Мюнхен")
+        self.assertEqual(p.data["parent_region"], "Бавария")
+
+    def test_region_can_be_inferred(self):
+        p = parse_text(
+            """Название: Северная область
+Страна: Турбания
+Административный центр: Лесоград
+Глава региона: Марк Светов"""
+        )
+        self.assertEqual(p.type, "region")
+
+    def test_text_export_contains_all_user_text(self):
+        page = Page(
+            owner_id=1,
+            type="region",
+            title="Лесополье",
+            data={
+                "title": "Лесополье",
+                "country": "Турбания",
+                "administrative_center": "Лесополь",
+                "custom_fields": [{"name": "Код", "value": "LP"}],
+                "sections": [{"title": "Экономика", "fields": [{"name": "Заводы", "value": "38"}]}],
+                "images": ["media_fake.webp"],
+                "image_captions": {"media_fake.webp": "Карта региона"},
+            },
+        )
+        text = page_to_text(page)
+        self.assertTrue(text.startswith("РЕГИОН\n"))
+        self.assertIn("Название: Лесополье", text)
+        self.assertIn("Страна: Турбания", text)
+        self.assertIn("Код: LP", text)
+        self.assertIn("Заводы: 38", text)
+        self.assertIn("Изображение 1: Карта региона", text)
+        self.assertNotIn("media_fake.webp", text)
+        self.assertGreater(len(split_text("x" * 9000)), 1)
+
+    def test_aurelia_html_has_alternating_row_background(self):
+        p = Page(
+            owner_id=1,
+            type="region",
+            title="Тест",
+            theme="aurelia",
+            data={"title": "Тест", "country": "Турбания", "area": "100 км²"},
+        )
+        html = make_html(p)
+        self.assertIn('data-theme="aurelia"', html)
+        self.assertIn("--row-alt:#000000", html)
+        self.assertIn('row.row-alt', html)
+        self.assertEqual(html.count('class="row row-alt"'), 1)
 
     def test_custom_section(self):
         sec = parse_section("МАГИЯ\nОсновная школа — Некромантия\nКоличество магов: 38 000")
@@ -73,6 +141,30 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", s)
         self.assertIn("A&amp;B", s)
         self.assertNotIn("INFOBOX BOT", make_html(p, watermark=False))
+
+
+class BattleSideTests(unittest.TestCase):
+    def test_legacy_sides_are_upgraded(self):
+        d = {"side_1": "Турбания\nКефирстан", "side_2": "Йогуртстан\nСеверная коалиция"}
+        sides = normalize_sides(d)
+        self.assertEqual(sides[0]["name"], "Турбания")
+        self.assertEqual(sides[0]["members"][0]["name"], "Кефирстан")
+        self.assertEqual(sides[1]["members"][0]["name"], "Северная коалиция")
+
+    def test_side_flags_are_synced_to_battle_image_roles(self):
+        d = {"title": "Тест", "images": ["media_main.webp"]}
+        sides = normalize_sides(d)
+        sides[0]["name"] = "Кефирстан"
+        sides[0]["members"] = [{"name": "Северная армия", "flag": "media_flag1.webp"}]
+        sides[1]["name"] = "Йогуртстан"
+        sides[1]["members"] = [{"name": "Южная армия", "flag": "media_flag2.webp"}]
+        save_sides(d, sides)
+        self.assertEqual(d["side_1"], "Кефирстан\nСеверная армия")
+        self.assertEqual(d["side_2"], "Йогуртстан\nЮжная армия")
+        self.assertIn("media_flag1.webp", d["images"])
+        self.assertIn("media_flag2.webp", d["images"])
+        self.assertEqual(d["image_captions"]["media_flag1.webp"], "s1:Северная армия")
+        self.assertEqual(d["image_captions"]["media_flag2.webp"], "s2:Южная армия")
 
 
 class DbTests(unittest.IsolatedAsyncioTestCase):
@@ -119,6 +211,24 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((saved.theme, saved.quality), ("aurelia", "ultra"))
         self.assertFalse(saved.watermark)
 
+    async def test_generation_stats_and_milestone(self):
+        total, own, milestone = await self.db.count_generation(101)
+        self.assertEqual((total, own, milestone), (1, 1, None))
+        total, own, milestone = await self.db.count_generation(101)
+        self.assertEqual((total, own, milestone), (2, 2, None))
+        total, own = await self.db.get_generation_stats(101)
+        self.assertEqual((total, own), (2, 2))
+
+        with sqlite3.connect(self.db.path) as conn:
+            conn.execute("UPDATE generation_totals SET total = 99 WHERE id = 1")
+        total, own, milestone = await self.db.count_generation(202)
+        self.assertEqual(total, 100)
+        self.assertEqual(own, 1)
+        self.assertEqual(milestone, 100)
+        self.assertTrue(Db._is_generation_milestone(500))
+        self.assertTrue(Db._is_generation_milestone(1000))
+        self.assertFalse(Db._is_generation_milestone(2000))
+
     async def test_only_owner_can_drop_unattached_media(self):
         await self.db.add_media(12, "media_12_random.webp", 100, 100)
         self.assertFalse(await self.db.drop_unattached_media("media_12_random.webp", 13))
@@ -152,20 +262,6 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await self.db.drop_media_if_unused(path, 5))
         p2.data.pop("image")
         await self.db.update_page(p2)
-        self.assertTrue(await self.db.drop_media_if_unused(path, 5))
-
-    async def test_side_flag_is_treated_as_page_media(self):
-        path = "media_5_flag.webp"
-        data = {"title": "Битва", "side_1": "Турбания"}
-        sides = battle_sides(data)
-        sides[0][0]["flag"] = path
-        set_battle_sides(data, sides)
-        p = await self.db.save_page(
-            Page(owner_id=5, type="battle", title="Битва", data=data)
-        )
-        self.assertFalse(await self.db.drop_media_if_unused(path, 5))
-        p.data["battle_sides"][0][0]["flag"] = ""
-        await self.db.update_page(p)
         self.assertTrue(await self.db.drop_media_if_unused(path, 5))
 
 
@@ -211,15 +307,23 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image_caption(d, "media_two.webp", 0), "Второе изображение")
         self.assertNotIn("media_one.webp", d["image_captions"])
 
-    async def test_battle_sides_convert_legacy_fields_and_keep_flags(self):
-        d = {"side_1": "Турбания\nКефирстан", "side_2": "Йогуртстан"}
-        sides = battle_sides(d)
-        self.assertEqual([x["name"] for x in sides[0]], ["Турбания", "Кефирстан"])
-        sides[0][0]["flag"] = "media_turbaniya.webp"
-        set_battle_sides(d, sides)
-        self.assertEqual(d["side_1"], "Турбания\nКефирстан")
-        self.assertEqual(d["battle_sides"][0][0]["flag"], "media_turbaniya.webp")
-        self.assertIn("media_turbaniya.webp", page_media(d))
+
+    def test_battle_image_groups_support_multiple_flags(self):
+        d = {
+            "images": ["m1.webp", "f1.webp", "f2.webp", "f3.webp", "x1.webp"],
+            "image_captions": {
+                "m1.webp": "main: Главное изображение",
+                "f1.webp": "s1: Флаг 1",
+                "f2.webp": "s1: Флаг 2",
+                "f3.webp": "s2: Флаг 3",
+                "x1.webp": "extra: Доп",
+            },
+        }
+        main, side1, side2, extras = battle_image_groups(d)
+        self.assertEqual(main, ("m1.webp", "Главное изображение"))
+        self.assertEqual(side1, [("f1.webp", "Флаг 1"), ("f2.webp", "Флаг 2")])
+        self.assertEqual(side2, [("f3.webp", "Флаг 3")])
+        self.assertEqual(extras, [("x1.webp", "Доп")])
 
     async def test_image_is_checked_and_gets_random_name(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -271,24 +375,16 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Подпись два", s)
             self.assertNotIn("sheet::before", s)
 
-    async def test_battle_side_flags_are_rendered_safely(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            flag = Path(tmp) / "media_flag.webp"
-            Image.new("RGB", (90, 60), "green").save(flag, "WEBP")
-            data = {"title": "Битва", "side_1": "Турбания", "side_2": "Кефирстан"}
-            sides = battle_sides(data)
-            sides[0][0]["flag"] = flag.name
-            set_battle_sides(data, sides)
-            p = Page(owner_id=1, type="battle", title="Битва", data=data)
-            s = make_html(p, work_dir=tmp)
-            self.assertIn("side-flag", s)
-            self.assertIn("data:image/webp;base64,", s)
-            self.assertIn("Турбания", s)
 
-            out = Path(tmp) / "battle.png"
-            render_pillow(p, tmp, "standard", out, watermark=False)
-            self.assertGreater(out.stat().st_size, 5_000)
 
+    def test_custom_card_type_label_and_hide(self):
+        p = Page(owner_id=1, type="country", title="Тест", data={"title": "Тест", "card_type_label": "Кукуруза"})
+        html = make_html(p)
+        self.assertIn("КУКУРУЗА", html)
+
+        p.data["card_type_label"] = "скрыть"
+        html = make_html(p)
+        self.assertNotIn('class="kind">', html)
 
 class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
     async def test_pillow_fallback_png(self):

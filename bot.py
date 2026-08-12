@@ -5,6 +5,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import Config
 from create_handlers import router as create_router
+from battle_handlers import router as battle_router
 from db import Db
 from handlers import on_error
 from handlers import router as common_router
@@ -18,5 +19,6 @@ def make_dispatcher(db: Db, cfg: Config) -> Dispatcher:
     dp.include_router(common_router)
     dp.include_router(page_router)
     dp.include_router(create_router)
+    dp.include_router(battle_router)
     dp.errors()(on_error)
     return dp
