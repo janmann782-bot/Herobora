@@ -41,7 +41,6 @@ from ui import (
     image_caption_kb,
     page_actions_kb,
     page_image_kb,
-    paper_kb,
     progress_text,
     settings_kb,
     side_flag_kb,
@@ -122,36 +121,6 @@ class BotFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(pages[0].data["capital"], "Норд")
         self.assertEqual(pages[0].theme, "dark")
-
-    async def test_news_button_is_a_placeholder(self):
-        msg = fake_message()
-        await start_new(fake_callback("new:news", msg), self.state, self.db, self.cfg)
-        self.assertIn("Потом добавим", msg.answer.await_args.args[0])
-        self.assertIsNone(await self.state.get_state())
-
-    async def test_old_document_theme_gets_a_seed_for_country(self):
-        msg = fake_message()
-        await self.state.update_data(
-            type="country",
-            page_data={"title": "Архивная страна"},
-            theme="light",
-        )
-        path = self.cfg.work_dir / "preview_paper.png"
-        path.write_bytes(b"png")
-        with (
-            patch("create_handlers.render_page", AsyncMock(return_value=path)),
-            patch("create_handlers.send_png", AsyncMock()),
-        ):
-            await draft_theme(
-                fake_callback("dt:old_document", msg),
-                self.state,
-                self.db,
-                self.cfg,
-            )
-        d = await self.state.get_data()
-        self.assertEqual(d["theme"], "old_document")
-        self.assertIsInstance(d["page_data"]["paper_seed"], int)
-        self.assertTrue(d["page_data"]["paper_coffee"])
 
     async def test_quick_input_creates_reviewable_draft(self):
         msg = fake_message(
@@ -323,10 +292,6 @@ class KeyboardTests(unittest.TestCase):
             fields_kb(COUNTRY, data, 123456789),
             draft_kb("battle"),
             page_actions_kb(123456789, "battle"),
-            draft_kb("country", "old_document"),
-            page_actions_kb(123456789, "country", "old_document"),
-            paper_kb({"paper_seed": 12, "paper_coffee": True}),
-            paper_kb({"paper_seed": 12, "paper_coffee": False}, 123456789),
             battle_sides_kb(
                 {
                     "battle_sides": [

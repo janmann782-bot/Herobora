@@ -29,12 +29,11 @@ from media import (
     set_page_images,
 )
 from models import Page
-from paper import PAPER_COFFEE, ensure_paper, new_paper_seed, paper_status, seed_from_text
 from parser import parse_section
 from renderer import render_error_text, render_page
 from states import EditPage, clear_flow
 from templates import get_template
-from themes import get_theme, theme_allowed
+from themes import THEMES, get_theme
 from ui import (
     MY_PAGES,
     battle_sides_kb,
@@ -45,7 +44,6 @@ from ui import (
     main_menu,
     page_actions_kb,
     page_image_kb,
-    paper_kb,
     pages_kb,
     progress_text,
     render_progress,
@@ -108,7 +106,7 @@ async def render_saved(
         msg,
         path,
         caption,
-        None if document else page_actions_kb(p.id, p.type, p.theme),
+        None if document else page_actions_kb(p.id, p.type),
         document,
     )
     return path
@@ -834,125 +832,13 @@ async def page_image_caption_action(
     await q.message.answer(text, reply_markup=page_image_kb(page_id, len(images)))
 
 
-def page_paper_text(data: dict) -> str:
-    seed, brightness, coffee = paper_status(data)
-    return tr(
-        "paper_settings",
-        seed=seed,
-        brightness=brightness,
-        coffee="включен" if coffee else "отключен",
-    )
-
-
-@router.callback_query(F.data.startswith("p:paper:"))
-async def page_paper(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
-    await q.answer()
-    page_id = int(q.data.rsplit(":", 1)[1])
-    p = await get_owned(q, db, page_id)
-    if not p:
-        return
-    if p.type != "country" or p.theme != "old_document":
-        await q.message.answer(tr("paper_only"))
-        return
-
-    before = (p.data.get("paper_seed"), p.data.get(PAPER_COFFEE))
-    ensure_paper(p.data)
-    if before != (p.data.get("paper_seed"), p.data.get(PAPER_COFFEE)):
-        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
-        p.preview_path = None
-        await db.update_page(p)
-    await state.clear()
-    await q.message.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
-
-
-@router.callback_query(F.data.startswith("pp:"))
-async def page_paper_action(
-    q: CallbackQuery,
-    state: FSMContext,
-    db: Db,
-    cfg: Config,
-) -> None:
-    await q.answer()
-    _, raw_id, action = q.data.split(":")
-    page_id = int(raw_id)
-    p = await get_owned(q, db, page_id)
-    if not p:
-        return
-    if p.type != "country" or p.theme != "old_document":
-        await q.message.answer(tr("paper_only"))
-        return
-
-    ensure_paper(p.data)
-    if action == "input":
-        await state.clear()
-        await state.update_data(page_id=page_id)
-        await state.set_state(EditPage.paper_seed)
-        await q.message.answer(
-            tr("paper_seed_prompt"),
-            reply_markup=edit_value_kb(f"p:paper:{page_id}", f"p:o:{page_id}"),
-        )
-        return
-    if action == "new":
-        new_paper_seed(p.data)
-    elif action == "coffee":
-        p.data[PAPER_COFFEE] = not p.data[PAPER_COFFEE]
-    else:
-        return
-
-    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
-    p.preview_path = None
-    await db.update_page(p)
-    await q.message.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
-
-
-@router.message(EditPage.paper_seed)
-async def take_page_paper_seed(
-    msg: Message,
-    state: FSMContext,
-    db: Db,
-    cfg: Config,
-) -> None:
-    if not msg.text:
-        await msg.answer(tr("text_only"))
-        return
-    s = msg.text.strip()
-    if not s:
-        await msg.answer(tr("empty_value"))
-        return
-    if len(s) > 40:
-        await msg.answer(tr("too_long", limit=40))
-        return
-
-    d = await state.get_data()
-    p = await db.get_page(int(d.get("page_id") or 0), msg.from_user.id)
-    if not p:
-        await state.clear()
-        await msg.answer(tr("page_not_found"))
-        return
-    if p.type != "country" or p.theme != "old_document":
-        await state.clear()
-        await msg.answer(tr("paper_only"))
-        return
-
-    p.data["paper_seed"] = seed_from_text(s)
-    p.data.setdefault(PAPER_COFFEE, True)
-    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
-    p.preview_path = None
-    await db.update_page(p)
-    await state.clear()
-    await msg.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
-
-
 @router.callback_query(F.data.startswith("p:t:"))
 async def page_theme(q: CallbackQuery, db: Db) -> None:
     await q.answer()
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
-        await q.message.answer(
-            tr("choose_theme"),
-            reply_markup=themes_kb(f"pt:{page_id}", p.theme, p.type),
-        )
+        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme))
 
 
 @router.callback_query(F.data.startswith("pt:"))
@@ -966,12 +852,10 @@ async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
     if theme == "back":
         await render_saved(q.message, p, db, cfg)
         return
-    if not theme_allowed(theme, p.type):
+    if theme not in THEMES:
         return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")
     p.theme = theme
-    if theme == "old_document":
-        ensure_paper(p.data)
     p.preview_path = None
     await db.update_page(p)
     await render_saved(q.message, p, db, cfg)
@@ -987,7 +871,7 @@ async def copy_page(q: CallbackQuery, db: Db) -> None:
         return
     await q.message.answer(
         tr("copied", title=p.title),
-        reply_markup=page_actions_kb(p.id, p.type, p.theme),
+        reply_markup=page_actions_kb(p.id, p.type),
     )
 
 

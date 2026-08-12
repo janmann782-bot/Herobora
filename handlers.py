@@ -12,7 +12,7 @@ from db import Db
 from locales import tr
 from media import safe_unlink
 from states import clear_flow
-from themes import get_theme, theme_allowed
+from themes import THEMES, get_theme
 from ui import (
     CREATE,
     HELP,
@@ -119,7 +119,7 @@ async def save_default_theme(q: CallbackQuery, db: Db) -> None:
     if value == "back":
         await show_settings(q.message, db, q.from_user.id)
         return
-    if not theme_allowed(value):
+    if value not in THEMES:
         return
     s = await db.get_settings(q.from_user.id)
     s.theme = value

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import random
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from media import battle_sides, image_caption, page_images
 from models import Page
-from paper import finish_old_document, paper_profile, paper_seed
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
 
@@ -24,10 +22,6 @@ def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
         if isaac.is_file():
             return ImageFont.truetype(str(isaac), size), fallback
         return fallback
-
-    if theme.key == "old_document":
-        name = "NIMBUS_ROMAN_BOLD.otf" if bold else "NIMBUS_ROMAN_REGULAR.otf"
-        return _load_font(here, name, size)
 
     name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     return _load_font(here, name, size)
@@ -166,19 +160,15 @@ def _header(w: int, s: float, tpl: Template, page: Page, theme: Theme) -> Image.
 
     img = Image.new("RGB", (w, h), theme.panel_alt)
     draw = ImageDraw.Draw(img)
-    align = "left" if theme.key == "old_document" else "center"
-    x = pad
-    if theme.key == "old_document":
-        x += int(paper_profile(paper_seed(page.data))["header_x"] * s)
     y = pad
-    _draw_lines(draw, kind_lines, (x, y), kind_font, theme.accent, kh, w - x - pad, align)
+    _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.accent, kh, w - pad * 2, "center")
     y += len(kind_lines) * kh + gap
-    _draw_lines(draw, title_lines, (x, y), title_font, theme.text, th, w - x - pad, align)
+    _draw_lines(draw, title_lines, (pad, y), title_font, theme.text, th, w - pad * 2, "center")
     y += len(title_lines) * th
     if sub_lines:
         y += gap
         _draw_lines(
-            draw, sub_lines, (x, y), sub_font, theme.text_secondary, sh, w - x - pad, align
+            draw, sub_lines, (pad, y), sub_font, theme.text_secondary, sh, w - pad * 2, "center"
         )
     return img
 
@@ -328,11 +318,9 @@ def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     pad_y = int(9 * s)
     lines = _wrap(tmp, title, font, w - pad_x * 2)
     lh = _line_h(tmp, font)
-    bg = theme.panel if theme.key == "old_document" else theme.section_bg
-    img = Image.new("RGB", (w, pad_y * 2 + lh * len(lines)), bg)
+    img = Image.new("RGB", (w, pad_y * 2 + lh * len(lines)), theme.section_bg)
     draw = ImageDraw.Draw(img)
-    align = "left" if theme.key == "old_document" else "center"
-    _draw_lines(draw, lines, (pad_x, pad_y), font, theme.section_text, lh, w - pad_x * 2, align)
+    _draw_lines(draw, lines, (pad_x, pad_y), font, theme.section_text, lh, w - pad_x * 2, "center")
     return img
 
 
@@ -350,8 +338,7 @@ def _row(w: int, s: float, label: object, value: object, theme: Theme) -> Image.
     h = max(len(left) * lh1, len(right) * lh2) + pad_y * 2
     img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
-    label_bg = theme.panel if theme.key == "old_document" else theme.panel_alt
-    draw.rectangle((0, 0, label_w, h), fill=label_bg)
+    draw.rectangle((0, 0, label_w, h), fill=theme.panel_alt)
     draw.line(
         (label_w, 0, label_w, h),
         fill=theme.border,
@@ -548,8 +535,6 @@ def render_pillow(
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
     theme = get_theme(page.theme)
-    if theme.key == "old_document" and page.type != "country":
-        theme = get_theme("light")
     tpl = get_template(page.type)
     d = page.data
     s = PILLOW_SCALE.get(quality, PILLOW_SCALE["high"])
@@ -605,8 +590,7 @@ def render_pillow(
     if watermark:
         blocks.append(_footer(inner_w, s, theme))
 
-    old_document = theme.key == "old_document"
-    outer = 0 if old_document else int(26 * s)
+    outer = int(26 * s)
     content_h = sum(x.height for x in blocks) + bw * (len(blocks) - 1)
     img = Image.new("RGB", (card_w + outer * 2, content_h + outer * 2 + bw * 2), theme.background)
     draw = ImageDraw.Draw(img)
@@ -615,16 +599,12 @@ def render_pillow(
     draw.rectangle((x, y, x + card_w - 1, y + content_h + bw * 2 - 1), fill=theme.panel, outline=theme.border, width=bw)
     x += bw
     y += bw
-    rng = random.Random(paper_seed(d) ^ 0x51A1D) if old_document else None
     for i, block in enumerate(blocks):
-        shift = rng.randint(-max(1, int(3 * s)), max(1, int(4 * s))) if rng and i else 0
-        img.paste(block, (x + shift, y))
+        img.paste(block, (x, y))
         y += block.height
         if i < len(blocks) - 1:
             draw.line((x, y, x + inner_w - 1, y), fill=theme.border, width=bw)
             y += bw
 
     img.save(path, "PNG", compress_level=6, dpi=(144, 144))
-    if old_document:
-        finish_old_document(path, d)
     return path

@@ -25,7 +25,6 @@ class NewPage(StatesGroup):
     section = State()
     side_name = State()
     side_flag = State()
-    paper_seed = State()
     quick = State()
 
 
@@ -38,7 +37,6 @@ class EditPage(StatesGroup):
     image_caption = State()
     side_name = State()
     side_flag = State()
-    paper_seed = State()
 
 
 async def clear_flow(state: FSMContext, user_id: int, db: Db, cfg: Config) -> None:

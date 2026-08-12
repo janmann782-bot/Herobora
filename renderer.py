@@ -10,7 +10,6 @@ from uuid import uuid4
 
 from media import battle_sides, image_caption, page_images
 from models import Page
-from paper import finish_old_document, paper_css
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
 
@@ -57,8 +56,6 @@ def font_css() -> str:
         ("InfoBox Sans", "DejaVuSans-Bold.ttf", 700),
         ("InfoBox Mono", "DejaVuSansMono.ttf", 400),
         ("InfoBox Mono", "DejaVuSansMono-Bold.ttf", 700),
-        ("Old Document Serif", "NIMBUS_ROMAN_REGULAR.otf", 400),
-        ("Old Document Serif", "NIMBUS_ROMAN_BOLD.otf", 700),
     )
     out = []
     for family, name, weight in fonts:
@@ -66,12 +63,9 @@ def font_css() -> str:
         if not p.is_file():
             continue
         raw = base64.b64encode(p.read_bytes()).decode("ascii")
-        is_otf = p.suffix.lower() == ".otf"
-        mime = "font/otf" if is_otf else "font/ttf"
-        fmt = "opentype" if is_otf else "truetype"
         out.append(
-            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{raw}) "
-            f"format('{fmt}');font-style:normal;font-weight:{weight};}}"
+            f"@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,{raw}) "
+            f"format('truetype');font-style:normal;font-weight:{weight};}}"
         )
     return "".join(out)
 
@@ -188,8 +182,6 @@ def make_html(
 ) -> str:
     tpl = get_template(page.type)
     theme = theme or get_theme(page.theme)
-    if theme.key == "old_document" and page.type != "country":
-        theme = get_theme("light")
     d = page.data
     title = d.get("title") or page.title or "Без названия"
     subtitle = d.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
@@ -219,9 +211,6 @@ def make_html(
 
     body = standard_sections(tpl, d, work_dir) + custom_fields(d) + custom_sections(d) + desc_html
     vars_ = theme.css_vars()
-    paper_class = " old-document" if theme.key == "old_document" else ""
-    if paper_class:
-        vars_ += ";" + paper_css(d)
     footer = '<div class="footer">INFOBOX BOT</div>' if watermark else ""
 
     return f"""<!doctype html>
@@ -279,45 +268,10 @@ section h2 {{
 }}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
 .footer {{ padding: 12px 18px; text-align: right; color: var(--text-secondary); background: var(--panel-alt); border-top: var(--border-width) solid var(--border); font-size: 13px; letter-spacing: .04em; }}
-.sheet.old-document {{ overflow: hidden; }}
-.old-document header {{
-  padding: 34px 42px 28px; padding-left: calc(42px + var(--paper-header-x));
-  text-align: left; background: transparent; border-bottom-style: double;
-  border-bottom-width: 4px;
-}}
-.old-document .kind {{ font-size: 13px; letter-spacing: .18em; }}
-.old-document h1 {{
-  margin-top: 13px; font-size: 40px; font-weight: 700;
-  transform: rotate(var(--paper-title-angle)); transform-origin: left center;
-}}
-.old-document .subtitle {{ margin-top: 12px; font-size: 20px; font-style: italic; }}
-.old-document .gallery {{ margin: 24px 31px 27px; transform: translateX(var(--paper-row-x)); }}
-.old-document figure img {{ filter: sepia(.13) contrast(.97); }}
-.old-document figcaption {{ font-size: 17px; font-style: italic; }}
-.old-document section {{ border-top-color: color-mix(in srgb, var(--border) 72%, transparent); }}
-.old-document section h2 {{
-  padding: 11px 30px; padding-left: calc(30px + var(--paper-section-x));
-  text-align: left; background: transparent; border-bottom: 1px solid var(--border);
-  font-size: 23px; letter-spacing: .035em; text-transform: uppercase;
-}}
-.old-document section:nth-of-type(even) h2 {{ padding-left: calc(36px + var(--paper-section-x)); }}
-.old-document .row {{
-  grid-template-columns: minmax(170px, var(--paper-label-width)) 1fr;
-  transform: translateX(var(--paper-row-x));
-}}
-.old-document .row:nth-of-type(3n) {{ transform: translateX(calc(var(--paper-row-x) * -.65)); }}
-.old-document .row:nth-of-type(4n) {{ transform: translateX(calc(var(--paper-row-x) * .35)); }}
-.old-document .label {{
-  padding-left: 22px; background: transparent; border-right-style: dotted;
-  font-style: italic; font-weight: 700;
-}}
-.old-document .value {{ padding-left: 19px; }}
-.old-document .description-text {{ padding: 21px 33px 27px; text-indent: 22px; }}
-.old-document .footer {{ background: transparent; font-family: var(--font); }}
 </style>
 </head>
 <body>
-<article class="sheet{paper_class}" id="infobox">
+<article class="sheet" id="infobox">
   <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
   {gallery}
   {body}
@@ -370,8 +324,6 @@ async def render_page(
                 await ctx.close()
             finally:
                 await browser.close()
-        if page.type == "country" and page.theme == "old_document":
-            await asyncio.to_thread(finish_old_document, path, page.data)
     except Exception as chromium_error:
         log.warning("Chromium renderer недоступен, использую Pillow: %s", chromium_error)
         try:

@@ -29,12 +29,11 @@ from media import (
     set_page_images,
 )
 from models import Page
-from paper import PAPER_COFFEE, ensure_paper, new_paper_seed, paper_status, seed_from_text
 from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
 from states import NewPage, clear_flow
 from templates import get_template
-from themes import get_theme, theme_allowed
+from themes import get_theme
 from ui import (
     CREATE,
     HELP,
@@ -49,7 +48,6 @@ from ui import (
     image_kb,
     main_menu,
     page_actions_kb,
-    paper_kb,
     progress_text,
     quick_kb,
     render_progress,
@@ -99,17 +97,11 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
 def make_draft(d: dict, user_id: int) -> Page:
     data = d.get("page_data") or {}
     title = str(data.get("title") or "Без названия").strip()
-    page_type = d["type"]
-    theme = d.get("theme", "light")
-    if not theme_allowed(theme, page_type):
-        theme = "light"
-    if theme == "old_document":
-        ensure_paper(data)
     return Page(
         owner_id=user_id,
-        type=page_type,
+        type=d["type"],
         title=title,
-        theme=theme,
+        theme=d.get("theme", "light"),
         data=data,
         preview_path=d.get("preview_path"),
     )
@@ -129,7 +121,6 @@ async def show_preview(
         return None
 
     p = make_draft(d, user_id)
-    await state.update_data(page_data=p.data, theme=p.theme)
     settings = await db.get_settings(user_id)
     wait = await msg.answer(progress_text(8))
 
@@ -151,14 +142,14 @@ async def show_preview(
             msg,
             path,
             tr("draft_caption", title=p.title, theme=get_theme(p.theme).name),
-            draft_kb(p.type, p.theme),
+            draft_kb(p.type),
         )
         return p
     except Exception as e:
         log.exception("draft render failed for user %s", user_id)
         await msg.answer(
             tr("render_error", error=render_error_text(e)),
-            reply_markup=draft_kb(p.type, p.theme),
+            reply_markup=draft_kb(p.type),
         )
         return None
     finally:
@@ -201,35 +192,10 @@ async def show_draft_sides(msg: Message, state: FSMContext) -> None:
     )
 
 
-def paper_text(data: dict) -> str:
-    seed, brightness, coffee = paper_status(data)
-    return tr(
-        "paper_settings",
-        seed=seed,
-        brightness=brightness,
-        coffee="включен" if coffee else "отключен",
-    )
-
-
-async def show_draft_paper(msg: Message, state: FSMContext) -> None:
-    d = await state.get_data()
-    if d.get("type") != "country" or d.get("theme") != "old_document":
-        await msg.answer(tr("paper_only"))
-        return
-    data = d.get("page_data") or {}
-    ensure_paper(data)
-    await state.update_data(page_data=data)
-    await state.set_state(NewPage.review)
-    await msg.answer(paper_text(data), reply_markup=paper_kb(data))
-
-
 @router.callback_query(F.data.startswith("new:"))
 async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
     kind = q.data.split(":", 1)[1]
-    if kind == "news":
-        await q.message.answer(tr("news_later"), reply_markup=types_kb())
-        return
     try:
         get_template(kind)
     except ValueError:
@@ -241,7 +207,7 @@ async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
         type=kind,
         page_data={},
         i=0,
-        theme=s.theme if theme_allowed(s.theme, kind) else "light",
+        theme=s.theme,
         preview_path=None,
         max_image_mb=cfg.max_image_mb,
     )
@@ -313,10 +279,7 @@ async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, user
         await show_preview(msg, state, db, cfg, user_id)
         return
     await state.set_state(NewPage.theme)
-    await msg.answer(
-        tr("choose_theme"),
-        reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")),
-    )
+    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
 
 
 @router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
@@ -516,12 +479,9 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
             await show_preview(q.message, state, db, cfg, q.from_user.id)
         return
 
-    if not theme_allowed(value, d.get("type", "")):
+    if value not in {"light", "dark", "aurelia"}:
         return
-    data = d.get("page_data") or {}
-    if value == "old_document":
-        ensure_paper(data)
-    await state.update_data(theme=value, page_data=data)
+    await state.update_data(theme=value)
     await show_preview(q.message, state, db, cfg, q.from_user.id)
 
 
@@ -532,83 +492,7 @@ async def choose_draft_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(
-        tr("choose_theme"),
-        reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")),
-    )
-
-
-@router.callback_query(F.data == "draft:paper")
-async def draft_paper(q: CallbackQuery, state: FSMContext) -> None:
-    await q.answer()
-    await show_draft_paper(q.message, state)
-
-
-@router.callback_query(F.data.startswith("paper:"))
-async def draft_paper_action(
-    q: CallbackQuery,
-    state: FSMContext,
-    db: Db,
-    cfg: Config,
-) -> None:
-    await q.answer()
-    d = await state.get_data()
-    if d.get("type") != "country" or d.get("theme") != "old_document":
-        await q.message.answer(tr("paper_only"))
-        return
-
-    action = q.data.split(":", 1)[1]
-    if action == "back":
-        await show_preview(q.message, state, db, cfg, q.from_user.id)
-        return
-    if action == "input":
-        await state.set_state(NewPage.paper_seed)
-        await q.message.answer(
-            tr("paper_seed_prompt"),
-            reply_markup=edit_value_kb("draft:paper"),
-        )
-        return
-
-    data = d.get("page_data") or {}
-    ensure_paper(data)
-    if action == "new":
-        new_paper_seed(data)
-    elif action == "coffee":
-        data[PAPER_COFFEE] = not data[PAPER_COFFEE]
-    else:
-        return
-
-    safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    await state.update_data(page_data=data, preview_path=None)
-    await state.set_state(NewPage.review)
-    await q.message.answer(paper_text(data), reply_markup=paper_kb(data))
-
-
-@router.message(NewPage.paper_seed)
-async def take_draft_paper_seed(msg: Message, state: FSMContext, cfg: Config) -> None:
-    if not msg.text:
-        await msg.answer(tr("text_only"))
-        return
-    s = msg.text.strip()
-    if not s:
-        await msg.answer(tr("empty_value"))
-        return
-    if len(s) > 40:
-        await msg.answer(tr("too_long", limit=40))
-        return
-
-    d = await state.get_data()
-    if d.get("type") != "country" or d.get("theme") != "old_document":
-        await state.clear()
-        await msg.answer(tr("paper_only"))
-        return
-    data = d.get("page_data") or {}
-    data["paper_seed"] = seed_from_text(s)
-    data.setdefault(PAPER_COFFEE, True)
-    safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    await state.update_data(page_data=data, preview_path=None)
-    await state.set_state(NewPage.review)
-    await msg.answer(paper_text(data), reply_markup=paper_kb(data))
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
 
 
 @router.callback_query(F.data == "draft:fields")
@@ -1057,7 +941,7 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db) -> None:
     await state.clear()
     await q.message.answer(
         tr("saved", title=p.title),
-        reply_markup=page_actions_kb(p.id, p.type, p.theme),
+        reply_markup=page_actions_kb(p.id, p.type),
     )
 
 
@@ -1115,10 +999,7 @@ async def quick_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(
-        tr("choose_theme"),
-        reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")),
-    )
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")))
 
 
 @router.message(StateFilter(None), F.text)
@@ -1154,7 +1035,7 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
     await state.update_data(
         type=parsed.type,
         page_data=data,
-        theme=s.theme if theme_allowed(s.theme, parsed.type) else "light",
+        theme=s.theme,
         preview_path=None,
         quick_text=quick_text,
         max_image_mb=cfg.max_image_mb,

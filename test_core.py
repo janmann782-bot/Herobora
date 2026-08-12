@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -23,12 +22,11 @@ from media import (
     set_page_images,
 )
 from models import Page
-from paper import paper_profile, seed_from_text
 from parser import parse_section, parse_text
 from pillow_renderer import render_pillow
 from renderer import make_html, render_page
 from templates import get_template
-from themes import get_theme, theme_allowed, theme_choices
+from themes import get_theme
 
 
 class TemplateTests(unittest.TestCase):
@@ -43,18 +41,7 @@ class TemplateTests(unittest.TestCase):
         self.assertEqual(aurelia.border_width, 3)
         self.assertFalse(aurelia.pixel_border)
         self.assertIn("Isaac Fill", aurelia.font)
-        paper = get_theme("old_document")
-        self.assertIn("Old Document Serif", paper.font)
-        self.assertTrue(theme_allowed("old_document", "country"))
-        self.assertFalse(theme_allowed("old_document", "battle"))
-        self.assertNotIn("old_document", {x.key for x in theme_choices()})
         self.assertEqual(get_theme("nope").key, "light")
-
-    def test_paper_seed_is_reproducible(self):
-        seed = seed_from_text("архив-гринвальд")
-        self.assertEqual(seed, seed_from_text("архив-гринвальд"))
-        self.assertEqual(paper_profile(seed), paper_profile(seed))
-        self.assertNotEqual(paper_profile(seed), paper_profile(seed + 1))
 
     def test_fast_parser_is_not_strict_about_separators(self):
         p = parse_text(
@@ -304,35 +291,6 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
-    async def test_old_document_is_deterministic_and_coffee_can_be_disabled(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            data = {
-                "title": "Архивная республика",
-                "capital": "Северный",
-                "population": "4 200 000",
-                "paper_seed": 19480314,
-                "paper_coffee": True,
-            }
-            p = Page(
-                owner_id=1,
-                type="country",
-                title=data["title"],
-                theme="old_document",
-                data=data,
-            )
-            a = Path(tmp) / "a.png"
-            b = Path(tmp) / "b.png"
-            clean = Path(tmp) / "clean.png"
-            render_pillow(p, tmp, "standard", a, watermark=False)
-            render_pillow(p, tmp, "standard", b, watermark=False)
-            self.assertEqual(hashlib.sha256(a.read_bytes()).digest(), hashlib.sha256(b.read_bytes()).digest())
-
-            p.data["paper_coffee"] = False
-            render_pillow(p, tmp, "standard", clean, watermark=False)
-            self.assertNotEqual(hashlib.sha256(a.read_bytes()).digest(), hashlib.sha256(clean.read_bytes()).digest())
-            with Image.open(a) as img:
-                self.assertGreater(img.width, 900)
-
     async def test_pillow_fallback_png(self):
         with tempfile.TemporaryDirectory() as tmp:
             media = Path(tmp) / "media_1_test.png"
