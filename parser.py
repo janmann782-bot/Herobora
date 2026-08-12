@@ -9,13 +9,6 @@ TYPE_ALIASES = {
     "страна": "country",
     "государство": "country",
     "country": "country",
-    "регион": "region",
-    "область": "region",
-    "провинция": "region",
-    "штат": "region",
-    "земля": "region",
-    "округ": "region",
-    "region": "region",
     "битва": "battle",
     "сражение": "battle",
     "battle": "battle",
@@ -28,31 +21,11 @@ TYPE_ALIASES = {
 
 ALIASES = {
     "название": "title",
-    "надпись типа в карточке": "card_type_label",
-    "тип в карточке": "card_type_label",
-    "название типа в карточке": "card_type_label",
-    "шапка типа": "card_type_label",
     "имя": "title",
     "официальное название": "official_name",
     "альтернативное название": "alt_name",
     "столица": "capital",
     "крупнейший город": "largest_city",
-    "тип региона": "region_type",
-    "страна": "country",
-    "входит в": "parent_region",
-    "административный центр": "administrative_center",
-    "адм центр": "administrative_center",
-    "адм. центр": "administrative_center",
-    "административное деление": "administrative_divisions",
-    "глава региона": "head_of_region",
-    "губернатор": "head_of_region",
-    "законодательный орган": "legislature",
-    "парламент региона": "legislature",
-    "исполнительный орган": "executive_body",
-    "код региона": "region_code",
-    "код / аббревиатура": "region_code",
-    "официальный сайт": "website",
-    "сайт": "website",
     "население": "population",
     "площадь": "area",
     "плотность": "density",
@@ -70,9 +43,6 @@ ALIASES = {
     "основана": "founded",
     "основано": "founded",
     "дата основания": "founded",
-    "дата образования": "founded",
-    "образован": "founded",
-    "образована": "founded",
     "независимость": "independence",
     "валюта": "currency",
     "часовой пояс": "timezone",
@@ -158,17 +128,10 @@ def split_line(line: str) -> tuple[str, str] | None:
 
 
 def infer_type(keys: set[str]) -> str:
-    region_unique = {
-        "region_type", "country", "parent_region", "administrative_center",
-        "administrative_divisions", "head_of_region", "legislature", "executive_body",
-        "region_code", "website",
-    }
     scores = {
-        "country": 2 * len(keys & {"capital", "government", "currency", "head_of_state", "head_of_government"})
-        + len(keys & {"population", "area"}),
-        "region": 2 * len(keys & region_unique) + len(keys & {"population", "area", "density"}),
-        "battle": 2 * len(keys & {"part_of", "result", "side_1", "side_2", "losses_1"}),
-        "person": 2 * len(keys & {"birth_date", "position", "party", "profession", "full_name"}),
+        "country": len(keys & {"capital", "population", "government", "currency", "area"}),
+        "battle": len(keys & {"part_of", "result", "side_1", "side_2", "losses_1"}),
+        "person": len(keys & {"birth_date", "position", "party", "profession", "full_name"}),
     }
     return max(scores, key=scores.get) if max(scores.values()) else "country"
 
@@ -228,7 +191,7 @@ def parse_text(text: str) -> ParsedPage:
         elif len(data["custom_fields"]) < 20:
             data["custom_fields"].append({"name": label[:100], "value": value})
         else:
-            warnings.append("Лишние пользовательские поля после двадцатого не добавлены")
+            warnings.append("Лишние пользовательские поля после двадцатого не добавлены.")
 
     if not data["custom_fields"]:
         data.pop("custom_fields")

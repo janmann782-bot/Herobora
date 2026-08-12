@@ -8,8 +8,9 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from media import battle_image_groups, image_caption, page_images
+from media import battle_sides, image_caption, page_images
 from models import Page
+from paper import finish_old_document, paper_css
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
 
@@ -50,154 +51,29 @@ def image_uri(path: str | Path | None, work_dir: str | Path) -> str | None:
 @lru_cache(maxsize=1)
 def font_css() -> str:
     root = Path(__file__).resolve().parent
-
-    def find_font(name: str) -> Path | None:
-        candidates = (
-            root / name,
-            Path("/usr/share/fonts/truetype/liberation") / name,
-            Path("/usr/local/share/fonts") / name,
-            Path("C:/Windows/Fonts") / name,
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
-        return None
-
     fonts = (
         ("Isaac Fill", "ISAACFONTDESCRIPTIONENGRUS-FILL_0.TTF", 400),
-        ("Wikipedia Sans", "LiberationSans-Regular.ttf", 400),
-        ("Wikipedia Sans", "LiberationSans-Bold.ttf", 700),
-        ("Wikipedia Serif", "LiberationSerif-Regular.ttf", 400),
-        ("Wikipedia Serif", "LiberationSerif-Bold.ttf", 700),
-        ("InfoBox Mono", "LiberationMono-Regular.ttf", 400),
-        ("InfoBox Mono", "LiberationMono-Bold.ttf", 700),
+        ("InfoBox Sans", "DejaVuSans.ttf", 400),
+        ("InfoBox Sans", "DejaVuSans-Bold.ttf", 700),
+        ("InfoBox Mono", "DejaVuSansMono.ttf", 400),
+        ("InfoBox Mono", "DejaVuSansMono-Bold.ttf", 700),
+        ("Old Document Serif", "NIMBUS_ROMAN_REGULAR.otf", 400),
+        ("Old Document Serif", "NIMBUS_ROMAN_BOLD.otf", 700),
     )
     out = []
     for family, name, weight in fonts:
-        p = find_font(name)
-        if p is None:
+        p = root / name
+        if not p.is_file():
             continue
         raw = base64.b64encode(p.read_bytes()).decode("ascii")
+        is_otf = p.suffix.lower() == ".otf"
+        mime = "font/otf" if is_otf else "font/ttf"
+        fmt = "opentype" if is_otf else "truetype"
         out.append(
-            f"@font-face{{font-family:'{family}';src:url(data:font/ttf;base64,{raw}) "
-            f"format('truetype');font-style:normal;font-weight:{weight};}}"
+            f"@font-face{{font-family:'{family}';src:url(data:{mime};base64,{raw}) "
+            f"format('{fmt}');font-style:normal;font-weight:{weight};}}"
         )
     return "".join(out)
-
-
-
-
-def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | None, list[str], list[str], list[tuple[str, str]]]:
-    main_item, side1_items, side2_items, extra_items = battle_image_groups(data)
-
-    def to_uri_list(items: list[tuple[str, str]]) -> list[str]:
-        out = []
-        for path, _ in items:
-            uri = image_uri(path, work_dir)
-            if uri:
-                out.append(uri)
-        return out
-
-    main = None
-    if main_item:
-        uri = image_uri(main_item[0], work_dir)
-        if uri:
-            main = (uri, main_item[1])
-    extras = []
-    for path, caption in extra_items:
-        uri = image_uri(path, work_dir)
-        if uri:
-            extras.append((uri, caption))
-    return main, to_uri_list(side1_items), to_uri_list(side2_items), extras
-
-
-def battle_flags_row(flag_uris: list[str]) -> str:
-    if not flag_uris:
-        return ""
-    return "<div class=\"mini-flag-row\">" + "".join(
-        f'<img class=\"mini-flag\" src=\"{uri}\" alt=\"\">' for uri in flag_uris
-    ) + "</div>"
-
-
-def battle_side_cell(value: object, flag_uris: list[str]) -> str:
-    if value in (None, '', []):
-        value = '—'
-    return (
-        '<div class="battle-cell battle-side-name">'
-        f'{battle_flags_row(flag_uris)}'
-        f'<div class="battle-text">{value_html(value)}</div>'
-        '</div>'
-    )
-
-
-def battle_text_cell(value: object) -> str:
-    if value in (None, '', []):
-        value = '—'
-    return f'<div class="battle-cell"><div class="battle-text">{value_html(value)}</div></div>'
-
-
-def battle_side_section(title: str, left: object, right: object, flags1: list[str], flags2: list[str]) -> str:
-    if left in (None, '', []) and right in (None, '', []):
-        return ''
-    return (
-        f'<section><h2>{esc(title)}</h2>'
-        '<div class="battle-table">'
-        f'{battle_side_cell(left, flags1)}'
-        f'{battle_side_cell(right, flags2)}'
-        '</div></section>'
-    )
-
-
-def battle_two_col_section(title: str, left: object, right: object) -> str:
-    if left in (None, '', []) and right in (None, '', []):
-        return ''
-    return (
-        f'<section><h2>{esc(title)}</h2>'
-        '<div class="battle-table">'
-        f'{battle_text_cell(left)}'
-        f'{battle_text_cell(right)}'
-        '</div></section>'
-    )
-
-
-def battle_sections(data: dict, work_dir: str | Path) -> tuple[str, str]:
-    main, flags1, flags2, extras = battle_media(data, work_dir)
-    gallery = ''
-    if main:
-        img, caption = main
-        cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ''
-        gallery = f'<div class="gallery single"><figure><img src="{img}" alt="">{cap}</figure></div>'
-
-    top = []
-    for label, key in (("Дата", "date"), ("Место", "place"), ("Результат", "result")):
-        if data.get(key) not in (None, '', []):
-            top.append(row(label, data[key]))
-
-    body = ''.join(top)
-    body += battle_side_section('Стороны конфликта', data.get('side_1'), data.get('side_2'), flags1, flags2)
-    body += battle_two_col_section('Командующие и лидеры', data.get('commander_1'), data.get('commander_2'))
-    body += battle_two_col_section('Силы', data.get('strength_1'), data.get('strength_2'))
-    body += battle_two_col_section('Потери', data.get('losses_1'), data.get('losses_2'))
-
-    if extras:
-        figures = []
-        for img, caption in extras:
-            cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ''
-            figures.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
-        gallery += f'<section><h2>Дополнительные изображения</h2><div class="gallery multi">{"".join(figures)}</div></section>'
-    return gallery, body
-
-
-
-
-def resolve_kind_label(tpl: Template, data: dict) -> str:
-    value = str(data.get("card_type_label") or "").strip()
-    if not value:
-        return f"{tpl.emoji} {tpl.label}"
-    low = value.casefold().replace("ё", "е").strip()
-    if low in {"none", "hide", "hidden", "скрыть", "убрать", "нет", "off", "-"}:
-        return ""
-    return value.upper()
 
 
 def row(label: str, value: object) -> str:
@@ -235,6 +111,26 @@ def side_section(title: str, fields: list[Field], data: dict) -> str:
     return f'<section><h2>{esc(title)}</h2><div class="side-grid">{"".join(cells)}</div></section>'
 
 
+def battle_side_section(data: dict, work_dir: str | Path) -> str:
+    sides = battle_sides(data)
+    if not any(sides):
+        return ""
+
+    cols = []
+    for side in sides:
+        members = []
+        for x in side:
+            flag = image_uri(x.get("flag"), work_dir)
+            flag_html = f'<img class="side-flag" src="{flag}" alt="">' if flag else ""
+            members.append(
+                '<div class="side-member">'
+                f'{flag_html}<div>{value_html(x["name"])}</div>'
+                "</div>"
+            )
+        cols.append(f'<div class="side-col">{"".join(members)}</div>')
+    return f'<section><h2>Стороны</h2><div class="side-grid battle-sides">{"".join(cols)}</div></section>'
+
+
 def custom_fields(data: dict) -> str:
     items = data.get("custom_fields") or []
     rows = [
@@ -262,11 +158,8 @@ def custom_sections(data: dict) -> str:
     return "".join(out)
 
 
-def standard_sections(tpl: Template, data: dict, work_dir: str | Path = ".") -> tuple[str, str]:
-    if tpl.key == "battle":
-        return battle_sections(data, work_dir)
-
-    skip = {"card_type_label", "title", "description", "image_caption"}
+def standard_sections(tpl: Template, data: dict, work_dir: str | Path = ".") -> str:
+    skip = {"title", "description", "image_caption"}
     if tpl.subtitle_key:
         skip.add(tpl.subtitle_key)
 
@@ -278,24 +171,14 @@ def standard_sections(tpl: Template, data: dict, work_dir: str | Path = ".") -> 
     out = []
     for name in names:
         fields = [f for f in tpl.fields if f.section == name and f.key not in skip]
-        if any(f.column for f in fields):
+        if tpl.key == "battle" and name == "Стороны":
+            out.append(battle_side_section(data, work_dir))
+        elif any(f.column for f in fields):
             out.append(side_section(name, fields, data))
         else:
             out.append(normal_section(name, fields, data))
-    return "", "".join(out)
+    return "".join(out)
 
-
-def stripe_rows(body: str) -> str:
-    """Marks every second normal field row across the whole card, not per section."""
-    marker = '<div class="row">'
-    parts = body.split(marker)
-    if len(parts) == 1:
-        return body
-    out = [parts[0]]
-    for i, part in enumerate(parts[1:], start=1):
-        cls = 'row row-alt' if i % 2 == 0 else 'row'
-        out.append(f'<div class="{cls}">' + part)
-    return ''.join(out)
 
 def make_html(
     page: Page,
@@ -305,31 +188,28 @@ def make_html(
 ) -> str:
     tpl = get_template(page.type)
     theme = theme or get_theme(page.theme)
+    if theme.key == "old_document" and page.type != "country":
+        theme = get_theme("light")
     d = page.data
     title = d.get("title") or page.title or "Без названия"
     subtitle = d.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
+    images = []
+    for i, path in enumerate(page_images(d)):
+        uri = image_uri(path, work_dir)
+        if uri:
+            images.append((uri, image_caption(d, path, i)))
     description = d.get("description", "")
 
-    gallery_extra, body = standard_sections(tpl, d, work_dir)
-
-    gallery = gallery_extra
-    if tpl.key != "battle":
-        images = []
-        for i, path in enumerate(page_images(d)):
-            uri = image_uri(path, work_dir)
-            if uri:
-                images.append((uri, image_caption(d, path, i)))
-        if images:
-            figures = []
-            for img, caption in images:
-                cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ""
-                figures.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
-            mode = "single" if len(figures) == 1 else "multi"
-            gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
+    gallery = ""
+    if images:
+        figures = []
+        for img, caption in images:
+            cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ""
+            figures.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
+        mode = "single" if len(figures) == 1 else "multi"
+        gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
 
     subtitle_html = f'<div class="subtitle">{value_html(subtitle)}</div>' if subtitle else ""
-    kind_label = resolve_kind_label(tpl, d)
-    kind_html = f'<div class="kind">{esc(kind_label)}</div>' if kind_label else ""
     desc_html = ""
     if description:
         desc_html = (
@@ -337,9 +217,11 @@ def make_html(
             f'<div class="description-text">{value_html(description)}</div></section>'
         )
 
-    body = body + custom_fields(d) + custom_sections(d) + desc_html
-    body = stripe_rows(body)
+    body = standard_sections(tpl, d, work_dir) + custom_fields(d) + custom_sections(d) + desc_html
     vars_ = theme.css_vars()
+    paper_class = " old-document" if theme.key == "old_document" else ""
+    if paper_class:
+        vars_ += ";" + paper_css(d)
     footer = '<div class="footer">INFOBOX BOT</div>' if watermark else ""
 
     return f"""<!doctype html>
@@ -383,28 +265,60 @@ section h2 {{
 .row:first-of-type {{ border-top: 0; }}
 .label, .value {{ padding: 11px 15px; min-width: 0; overflow-wrap: anywhere; }}
 .label {{ color: var(--text-secondary); font-weight: 650; background: var(--panel-alt); border-right: var(--border-width) solid var(--border); }}
-.sheet[data-theme="aurelia"] section > .row .label,
-.sheet[data-theme="aurelia"] section > .row .value {{ background: var(--panel); }}
-.sheet[data-theme="aurelia"] section > .row.row-alt .label,
-.sheet[data-theme="aurelia"] section > .row.row-alt .value {{ background: var(--row-alt); }}
 .side-grid {{ display: grid; grid-template-columns: 1fr 1fr; }}
 .side-col {{ min-width: 0; padding: 13px 16px 15px; overflow-wrap: anywhere; }}
 .side-col + .side-col {{ border-left: var(--border-width) solid var(--border); }}
 .side-item + .side-item {{ margin-top: 12px; padding-top: 10px; border-top: var(--border-width) solid var(--border); }}
 .side-label {{ margin-bottom: 3px; color: var(--text-secondary); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }}
-.battle-table {{ display: grid; grid-template-columns: 1fr 1fr; }}
-.battle-cell {{ min-width: 0; padding: 12px 16px 14px; overflow-wrap: anywhere; text-align: left; }}
-.battle-cell + .battle-cell {{ border-left: var(--border-width) solid var(--border); }}
-.battle-side-name {{ display: flex; align-items: center; justify-content: center; gap: 10px; text-align: center; font-weight: 700; font-size: 22px; min-height: 74px; }}
-.mini-flag {{ width: 34px; height: 22px; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--image-border); background: var(--panel-alt); }}
-.battle-text {{ min-width: 0; }}
+.battle-sides .side-col {{ padding: 10px 14px; }}
+.side-member {{ display: flex; min-height: 44px; align-items: center; gap: 11px; padding: 7px 0; }}
+.side-member + .side-member {{ border-top: var(--border-width) solid var(--border); }}
+.side-flag {{
+  width: 54px; height: 36px; flex: 0 0 54px; object-fit: contain;
+  background: var(--panel-alt); border: var(--border-width) solid var(--image-border);
+}}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
 .footer {{ padding: 12px 18px; text-align: right; color: var(--text-secondary); background: var(--panel-alt); border-top: var(--border-width) solid var(--border); font-size: 13px; letter-spacing: .04em; }}
+.sheet.old-document {{ overflow: hidden; }}
+.old-document header {{
+  padding: 34px 42px 28px; padding-left: calc(42px + var(--paper-header-x));
+  text-align: left; background: transparent; border-bottom-style: double;
+  border-bottom-width: 4px;
+}}
+.old-document .kind {{ font-size: 13px; letter-spacing: .18em; }}
+.old-document h1 {{
+  margin-top: 13px; font-size: 40px; font-weight: 700;
+  transform: rotate(var(--paper-title-angle)); transform-origin: left center;
+}}
+.old-document .subtitle {{ margin-top: 12px; font-size: 20px; font-style: italic; }}
+.old-document .gallery {{ margin: 24px 31px 27px; transform: translateX(var(--paper-row-x)); }}
+.old-document figure img {{ filter: sepia(.13) contrast(.97); }}
+.old-document figcaption {{ font-size: 17px; font-style: italic; }}
+.old-document section {{ border-top-color: color-mix(in srgb, var(--border) 72%, transparent); }}
+.old-document section h2 {{
+  padding: 11px 30px; padding-left: calc(30px + var(--paper-section-x));
+  text-align: left; background: transparent; border-bottom: 1px solid var(--border);
+  font-size: 23px; letter-spacing: .035em; text-transform: uppercase;
+}}
+.old-document section:nth-of-type(even) h2 {{ padding-left: calc(36px + var(--paper-section-x)); }}
+.old-document .row {{
+  grid-template-columns: minmax(170px, var(--paper-label-width)) 1fr;
+  transform: translateX(var(--paper-row-x));
+}}
+.old-document .row:nth-of-type(3n) {{ transform: translateX(calc(var(--paper-row-x) * -.65)); }}
+.old-document .row:nth-of-type(4n) {{ transform: translateX(calc(var(--paper-row-x) * .35)); }}
+.old-document .label {{
+  padding-left: 22px; background: transparent; border-right-style: dotted;
+  font-style: italic; font-weight: 700;
+}}
+.old-document .value {{ padding-left: 19px; }}
+.old-document .description-text {{ padding: 21px 33px 27px; text-indent: 22px; }}
+.old-document .footer {{ background: transparent; font-family: var(--font); }}
 </style>
 </head>
 <body>
-<article class="sheet" id="infobox" data-theme="{esc(theme.key)}">
-  <header>{kind_html}<h1>{esc(title)}</h1>{subtitle_html}</header>
+<article class="sheet{paper_class}" id="infobox">
+  <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
   {gallery}
   {body}
   {footer}
@@ -456,6 +370,8 @@ async def render_page(
                 await ctx.close()
             finally:
                 await browser.close()
+        if page.type == "country" and page.theme == "old_document":
+            await asyncio.to_thread(finish_old_document, path, page.data)
     except Exception as chromium_error:
         log.warning("Chromium renderer недоступен, использую Pillow: %s", chromium_error)
         try:

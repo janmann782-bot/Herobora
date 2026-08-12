@@ -12,13 +12,11 @@ from db import Db
 from locales import tr
 from media import safe_unlink
 from states import clear_flow
-from stats import format_count
-from themes import THEMES, get_theme
+from themes import get_theme, theme_allowed
 from ui import (
     CREATE,
     HELP,
     SETTINGS,
-    STATS,
     THEMES_BTN,
     main_menu,
     quality_kb,
@@ -46,7 +44,6 @@ async def show_settings(msg: Message, db: Db, user_id: int) -> None:
             watermark="включена" if s.watermark else "отключена",
         ),
         reply_markup=settings_kb(s.watermark),
-        parse_mode="HTML",
     )
 
 
@@ -58,44 +55,26 @@ async def start(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
         msg.from_user.first_name or "",
         msg.from_user.username or "",
     )
-    await msg.answer(tr("welcome"), reply_markup=main_menu(), parse_mode="HTML")
+    await msg.answer(tr("welcome"), reply_markup=main_menu())
 
 
 @router.message(Command("help"))
 @router.message(F.text == HELP)
 async def help_message(msg: Message) -> None:
-    await msg.answer(tr("help"), reply_markup=main_menu(), parse_mode="HTML")
+    await msg.answer(tr("help"), reply_markup=main_menu())
 
 
 @router.message(Command("create"))
 @router.message(F.text == CREATE)
 async def create(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
-    await msg.answer(tr("choose_type"), reply_markup=types_kb(), parse_mode="HTML")
+    await msg.answer(tr("choose_type"), reply_markup=types_kb())
 
 
 @router.message(Command("cancel"))
 async def cancel(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
     await msg.answer(tr("cancelled"), reply_markup=main_menu())
-
-
-@router.message(Command("stats"))
-@router.message(F.text == STATS)
-async def statistics(msg: Message, db: Db) -> None:
-    await db.touch_user(
-        msg.from_user.id,
-        msg.from_user.first_name or "",
-        msg.from_user.username or "",
-    )
-    total, own = await db.get_generation_stats(msg.from_user.id)
-    await msg.answer(
-        "🥰 <b>Статистика</b>\n\n"
-        f"Всего генераций: <b>{format_count(total)}</b>\n"
-        f"Твои генерации: <b>{format_count(own)}</b>\n\n"
-        "<i>Считается первое успешное создание новой карточки даже если её потом не сохранять</i>",
-        parse_mode="HTML",
-    )
 
 
 @router.message(Command("settings"))
@@ -110,14 +89,14 @@ async def settings(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None
 async def themes(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
     s = await db.get_settings(msg.from_user.id)
-    await msg.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme), parse_mode="HTML")
+    await msg.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme))
 
 
 @router.callback_query(F.data == "menu:home")
 async def home(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
     await clear_flow(state, q.from_user.id, db, cfg)
-    await q.message.answer(tr("welcome"), reply_markup=main_menu(), parse_mode="HTML")
+    await q.message.answer(tr("welcome"), reply_markup=main_menu())
 
 
 @router.callback_query(F.data == "settings:back")
@@ -130,7 +109,7 @@ async def settings_back(q: CallbackQuery, db: Db) -> None:
 async def settings_theme(q: CallbackQuery, db: Db) -> None:
     await q.answer()
     s = await db.get_settings(q.from_user.id)
-    await q.message.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme), parse_mode="HTML")
+    await q.message.answer(tr("settings_theme"), reply_markup=themes_kb("st", s.theme))
 
 
 @router.callback_query(F.data.startswith("st:"))
@@ -140,7 +119,7 @@ async def save_default_theme(q: CallbackQuery, db: Db) -> None:
     if value == "back":
         await show_settings(q.message, db, q.from_user.id)
         return
-    if value not in THEMES:
+    if not theme_allowed(value):
         return
     s = await db.get_settings(q.from_user.id)
     s.theme = value
@@ -153,7 +132,7 @@ async def save_default_theme(q: CallbackQuery, db: Db) -> None:
 async def settings_quality(q: CallbackQuery, db: Db) -> None:
     await q.answer()
     s = await db.get_settings(q.from_user.id)
-    await q.message.answer(tr("settings_quality"), reply_markup=quality_kb(s.quality), parse_mode="HTML")
+    await q.message.answer(tr("settings_quality"), reply_markup=quality_kb(s.quality))
 
 
 @router.callback_query(F.data.startswith("quality:"))

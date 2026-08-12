@@ -19,7 +19,6 @@ async def setup_telegram(bot: Bot) -> None:
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="create", description="Создать страницу"),
         BotCommand(command="my_pages", description="Мои страницы"),
-        BotCommand(command="stats", description="Статистика генераций"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="help", description="Помощь"),
         BotCommand(command="cancel", description="Отменить текущее действие"),

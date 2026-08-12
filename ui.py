@@ -17,15 +17,16 @@ from aiogram.types import (
 
 from models import Page
 from locales import tr
+from media import battle_sides
+from paper import paper_status
 from templates import TEMPLATES, Template
-from themes import THEMES
+from themes import theme_choices
 
 CREATE = "➕ Создать"
 MY_PAGES = "📚 Мои страницы"
 THEMES_BTN = "🎨 Темы"
 SETTINGS = "⚙️ Настройки"
 HELP = "ℹ️ Помощь"
-STATS = "🥰Статистика"
 T = TypeVar("T")
 
 
@@ -38,10 +39,10 @@ def main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=CREATE), KeyboardButton(text=MY_PAGES)],
             [KeyboardButton(text=THEMES_BTN), KeyboardButton(text=SETTINGS)],
-            [KeyboardButton(text=STATS), KeyboardButton(text=HELP)],
+            [KeyboardButton(text=HELP)],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Создать карточку или прислать данные текстом",
+        input_field_placeholder="Создать карточку или отправить быстрый текст",
     )
 
 
@@ -50,6 +51,7 @@ def types_kb() -> InlineKeyboardMarkup:
         [ib(f"{x.emoji} {x.label}", f"new:{x.key}")]
         for x in TEMPLATES.values()
     ]
+    rows.append([ib("📰 Новость", "new:news")])
     rows.append([ib("❌ Отмена", "flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -109,32 +111,37 @@ def image_caption_kb(page_id: int | None = None) -> InlineKeyboardMarkup:
     )
 
 
-def themes_kb(prefix: str, selected: str = "") -> InlineKeyboardMarkup:
+def themes_kb(prefix: str, selected: str = "", page_type: str = "") -> InlineKeyboardMarkup:
     rows = []
-    for x in THEMES.values():
-        mark = "▼ " if x.key == selected else ""
+    for x in theme_choices(page_type):
+        mark = "✓ " if x.key == selected else ""
         rows.append([ib(f"{mark}{x.name}", f"{prefix}:{x.key}")])
     rows.append([ib("⬅️ Назад", f"{prefix}:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def draft_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
-            [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
-            [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
-            [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
-            [ib("❌ Отмена", "draft:cancel")],
-        ]
-    )
+def draft_kb(page_type: str = "", theme: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
+        [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
+    ]
+    if page_type == "battle":
+        rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
+    if page_type == "country" and theme == "old_document":
+        rows.append([ib("📜 Вид документа", "draft:paper")])
+    rows += [
+        [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
+        [ib("📤 Экспорт PNG", "draft:export")],
+        [ib("❌ Отмена", "draft:cancel")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def quick_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [ib("👁 Предпросмотр", "quick:preview"), ib("✏️ Проверить поля", "quick:fields")],
-            [ib("🎨 Выбрать тему", "quick:theme"), ib("📋 Выслать текстом", "quick:text")],
+            [ib("🎨 Выбрать тему", "quick:theme")],
             [ib("❌ Отмена", "flow:cancel")],
         ]
     )
@@ -144,6 +151,8 @@ def fields_kb(tpl: Template, data: dict, page_id: int | None = None) -> InlineKe
     rows = []
     btns = []
     for i, f in enumerate(tpl.fields):
+        if tpl.key == "battle" and f.key in {"side_1", "side_2"}:
+            continue
         mark = "✓ " if data.get(f.key) not in (None, "", []) else ""
         cb = f"df:{i}" if page_id is None else f"pe:{page_id}:s:{i}"
         btns.append(ib(f"{mark}{f.label}"[:32], cb))
@@ -171,14 +180,18 @@ def fields_kb(tpl: Template, data: dict, page_id: int | None = None) -> InlineKe
         rows += [
             [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
             [ib("🖼 Изображения", "draft:image")],
-            [ib("⬅️ К предпросмотру", "draft:back")],
         ]
+        if tpl.key == "battle":
+            rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
+        rows.append([ib("⬅️ К предпросмотру", "draft:back")])
     else:
         rows += [
             [ib("➕ Свое поле", f"pa:{page_id}:custom"), ib("🧩 Свой раздел", f"pa:{page_id}:section")],
             [ib("🖼 Изображения", f"pa:{page_id}:image")],
-            [ib("⬅️ К странице", f"p:o:{page_id}")],
         ]
+        if tpl.key == "battle":
+            rows.append([ib("⚔️ Редактор сторон", f"p:s:{page_id}")])
+        rows.append([ib("⬅️ К странице", f"p:o:{page_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -191,16 +204,79 @@ def edit_value_kb(back: str, cancel: str = "flow:cancel") -> InlineKeyboardMarku
     )
 
 
-def page_actions_kb(page_id: int) -> InlineKeyboardMarkup:
+def page_actions_kb(page_id: int, page_type: str = "", theme: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [ib("✏️ Изменить", f"p:e:{page_id}"), ib("🎨 Тема", f"p:t:{page_id}")],
+    ]
+    if page_type == "battle":
+        rows.append([ib("⚔️ Редактор сторон", f"p:s:{page_id}")])
+    if page_type == "country" and theme == "old_document":
+        rows.append([ib("📜 Вид документа", f"p:paper:{page_id}")])
+    rows += [
+        [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📄 Копия", f"p:c:{page_id}")],
+        [ib("🗑 Удалить", f"p:d:{page_id}")],
+        [ib("⬅️ Мои страницы", "pages:list")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def paper_kb(data: dict, page_id: int | None = None) -> InlineKeyboardMarkup:
+    _, _, coffee = paper_status(data)
+    mark = "вкл" if coffee else "выкл"
+    if page_id is None:
+        new, change, toggle, back = (
+            "paper:new",
+            "paper:input",
+            "paper:coffee",
+            "paper:back",
+        )
+    else:
+        new, change, toggle, back = (
+            f"pp:{page_id}:new",
+            f"pp:{page_id}:input",
+            f"pp:{page_id}:coffee",
+            f"p:o:{page_id}",
+        )
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [ib("✏️ Изменить", f"p:e:{page_id}"), ib("🎨 Тема", f"p:t:{page_id}")],
-            [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📋 Выслать текстом", f"p:txt:{page_id}")],
-            [ib("📄 Копия", f"p:c:{page_id}")],
-            [ib("🗑 Удалить", f"p:d:{page_id}")],
-            [ib("⬅️ Мои страницы", "pages:list")],
+            [ib("🎲 Новый вариант", new), ib("🔢 Ввести сид", change)],
+            [ib(f"☕ След кружки: {mark}", toggle)],
+            [ib("⬅️ Назад", back)],
         ]
     )
+
+
+def battle_sides_kb(data: dict, page_id: int | None = None) -> InlineKeyboardMarkup:
+    sides = battle_sides(data)
+    prefix = "bs" if page_id is None else f"bp:{page_id}"
+    rows = []
+    for i, side in enumerate(sides):
+        rows.append([ib(f"➕ Участник в сторону {i + 1}", f"{prefix}:a:{i}")])
+        for j, x in enumerate(side):
+            mark = "✅" if x.get("flag") else "🏳️"
+            rows.append(
+                [
+                    ib(f"✏️ {x['name']}"[:25], f"{prefix}:n:{i}:{j}"),
+                    ib(mark, f"{prefix}:f:{i}:{j}"),
+                    ib("🗑", f"{prefix}:r:{i}:{j}"),
+                ]
+            )
+    done = "bs:d" if page_id is None else f"bp:{page_id}:d"
+    back = "draft:back" if page_id is None else f"p:o:{page_id}"
+    rows += [[ib("✅ Готово", done)], [ib("⬅️ Назад", back)]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def side_flag_kb(has_flag: bool, page_id: int | None = None) -> InlineKeyboardMarkup:
+    if page_id is None:
+        remove, back = "bf:rm", "bf:back"
+    else:
+        remove, back = f"pf:{page_id}:rm", f"pf:{page_id}:back"
+    rows = []
+    if has_flag:
+        rows.append([ib("🗑 Удалить флаг", remove)])
+    rows.append([ib("⬅️ К редактору сторон", back)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def pages_kb(pages: list[Page]) -> InlineKeyboardMarkup:
@@ -241,7 +317,7 @@ def settings_kb(watermark: bool | None = None) -> InlineKeyboardMarkup:
 def quality_kb(selected: str) -> InlineKeyboardMarkup:
     names = {"standard": "Обычное", "high": "Высокое", "ultra": "Очень высокое"}
     rows = [
-        [ib(("▼ " if k == selected else "") + v, f"quality:{k}")]
+        [ib(("✓ " if k == selected else "") + v, f"quality:{k}")]
         for k, v in names.items()
     ]
     rows.append([ib("⬅️ Назад", "settings:back")])

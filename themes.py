@@ -23,7 +23,6 @@ class Theme:
     radius: int = 4
     pixel_border: bool = False
     image_border: str = "#A2A9B1"
-    row_alt: str | None = None
 
     def css_vars(self) -> str:
         d = {
@@ -42,7 +41,6 @@ class Theme:
             "border-width": f"{self.border_width}px",
             "radius": f"{self.radius}px",
             "image-border": self.image_border,
-            "row-alt": self.row_alt or self.panel,
             "pixel-step": "3px" if self.pixel_border else "0px",
         }
         return ";".join(f"--{k}:{v}" for k, v in d.items())
@@ -61,8 +59,8 @@ LIGHT = Theme(
     section_bg="#dce8f4",
     section_text="#1f2d3d",
     link="#3366cc",
-    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
-    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
+    font="'InfoBox Sans', Arial, sans-serif",
+    heading_font="'InfoBox Sans', Arial, sans-serif",
     radius=5,
 )
 
@@ -80,8 +78,8 @@ DARK = Theme(
     section_bg="#293747",
     section_text="#f3f6fa",
     link="#8ab4f8",
-    font="'Wikipedia Sans', 'Liberation Sans', Arial, Helvetica, sans-serif",
-    heading_font="'Wikipedia Serif', 'Liberation Serif', Georgia, 'Times New Roman', serif",
+    font="'InfoBox Sans', Arial, sans-serif",
+    heading_font="'InfoBox Sans', Arial, sans-serif",
     radius=5,
     image_border="#5d6976",
 )
@@ -109,8 +107,38 @@ AURELIA = Theme(
 )
 
 
-THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA)}
+OLD_DOCUMENT = Theme(
+    key="old_document",
+    name="Старый документ",
+    background="#3e3831",
+    panel="#eee2c4",
+    panel_alt="#e8d9b4",
+    text="#241b12",
+    text_secondary="#4a3523",
+    accent="#6f3f1f",
+    border="#765333",
+    section_bg="#d9c69a",
+    section_text="#2d2117",
+    link="#6a351b",
+    font="'Old Document Serif', 'Times New Roman', serif",
+    heading_font="'Old Document Serif', 'Times New Roman', serif",
+    radius=0,
+    image_border="#765333",
+)
+
+
+THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLD_DOCUMENT)}
 
 
 def get_theme(key: str) -> Theme:
     return THEMES.get(key, LIGHT)
+
+
+def theme_allowed(key: str, page_type: str = "") -> bool:
+    if key not in THEMES:
+        return False
+    return key != OLD_DOCUMENT.key or page_type == "country"
+
+
+def theme_choices(page_type: str = "") -> tuple[Theme, ...]:
+    return tuple(x for x in THEMES.values() if theme_allowed(x.key, page_type))

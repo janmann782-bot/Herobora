@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import random
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from media import battle_image_groups, image_caption, page_images
+from media import battle_sides, image_caption, page_images
 from models import Page
+from paper import finish_old_document, paper_profile, paper_seed
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
 
@@ -13,39 +15,28 @@ from themes import Theme, get_theme
 PILLOW_SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
-
-
-def _resolve_kind_label(tpl: Template, data: dict) -> str:
-    value = str(data.get("card_type_label") or "").strip()
-    if not value:
-        return tpl.label.upper()
-    low = value.casefold().replace("ё", "е").strip()
-    if low in {"none", "hide", "hidden", "скрыть", "убрать", "нет", "off", "-"}:
-        return ""
-    return value.upper()
-
-
 def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
     here = Path(__file__).resolve().parent
     if theme.key == "aurelia":
-        fallback_name = "LiberationMono-Bold.ttf" if bold else "LiberationMono-Regular.ttf"
+        fallback_name = "DejaVuSansMono-Bold.ttf" if bold else "DejaVuSansMono.ttf"
         fallback = _load_font(here, fallback_name, size)
         isaac = here / "ISAACFONTDESCRIPTIONENGRUS-FILL_0.TTF"
         if isaac.is_file():
             return ImageFont.truetype(str(isaac), size), fallback
         return fallback
 
-    if heading:
-        name = "LiberationSerif-Bold.ttf" if bold else "LiberationSerif-Regular.ttf"
-    else:
-        name = "LiberationSans-Bold.ttf" if bold else "LiberationSans-Regular.ttf"
+    if theme.key == "old_document":
+        name = "NIMBUS_ROMAN_BOLD.otf" if bold else "NIMBUS_ROMAN_REGULAR.otf"
+        return _load_font(here, name, size)
+
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     return _load_font(here, name, size)
 
 
 def _load_font(here: Path, name: str, size: int):
     paths = [
         here / name,
-        Path("/usr/share/fonts/truetype/liberation") / name,
+        Path("/usr/share/fonts/truetype/dejavu") / name,
         Path("/usr/local/share/fonts") / name,
         Path("C:/Windows/Fonts") / name,
     ]
@@ -161,31 +152,33 @@ def _header(w: int, s: float, tpl: Template, page: Page, theme: Theme) -> Image.
     pad = int(28 * s)
     title = page.data.get("title") or page.title or "Без названия"
     subtitle = page.data.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
-    kind = _resolve_kind_label(tpl, page.data)
-    kind_lines = _wrap(draw, kind, kind_font, w - pad * 2) if kind else []
+    kind = tpl.label.upper()
+    kind_lines = _wrap(draw, kind, kind_font, w - pad * 2)
     title_lines = _wrap(draw, title, title_font, w - pad * 2)
     sub_lines = _wrap(draw, subtitle, sub_font, w - pad * 2) if subtitle else []
     kh = _line_h(draw, kind_font)
     th = _line_h(draw, title_font)
     sh = _line_h(draw, sub_font)
     gap = int(7 * s)
-    top_gap = gap if kind_lines else 0
-    h = pad + len(kind_lines) * kh + top_gap + len(title_lines) * th + pad
+    h = pad + len(kind_lines) * kh + gap + len(title_lines) * th + pad
     if sub_lines:
         h += gap + len(sub_lines) * sh
 
     img = Image.new("RGB", (w, h), theme.panel_alt)
     draw = ImageDraw.Draw(img)
+    align = "left" if theme.key == "old_document" else "center"
+    x = pad
+    if theme.key == "old_document":
+        x += int(paper_profile(paper_seed(page.data))["header_x"] * s)
     y = pad
-    if kind_lines:
-        _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.accent, kh, w - pad * 2, "center")
-        y += len(kind_lines) * kh + gap
-    _draw_lines(draw, title_lines, (pad, y), title_font, theme.text, th, w - pad * 2, "center")
+    _draw_lines(draw, kind_lines, (x, y), kind_font, theme.accent, kh, w - x - pad, align)
+    y += len(kind_lines) * kh + gap
+    _draw_lines(draw, title_lines, (x, y), title_font, theme.text, th, w - x - pad, align)
     y += len(title_lines) * th
     if sub_lines:
         y += gap
         _draw_lines(
-            draw, sub_lines, (pad, y), sub_font, theme.text_secondary, sh, w - pad * 2, "center"
+            draw, sub_lines, (x, y), sub_font, theme.text_secondary, sh, w - x - pad, align
         )
     return img
 
@@ -328,165 +321,6 @@ def _gallery(
     return img
 
 
-def _battle_media_items(data: dict, root: Path):
-    main_item, side1_items, side2_items, extra_items = battle_image_groups(data)
-
-    def resolve(item):
-        if not item:
-            return None
-        path = _media_path(item[0], root)
-        if not path:
-            return None
-        return path, item[1]
-
-    def resolve_list(items):
-        out = []
-        for path, caption in items:
-            p = _media_path(path, root)
-            if p:
-                out.append((p, caption))
-        return out
-
-    return resolve(main_item), resolve_list(side1_items), resolve_list(side2_items), resolve_list(extra_items)
-
-
-def _flag_thumb(path: Path, size: tuple[int, int], bg: str):
-    try:
-        src = ImageOps.exif_transpose(Image.open(path))
-        src.load()
-    except Exception:
-        return None
-    src = src.convert('RGB')
-    src = ImageOps.fit(src, size, Image.Resampling.LANCZOS)
-    base = Image.new('RGB', size, bg)
-    base.paste(src, (0, 0))
-    return base
-
-
-def _battle_side_cells(w: int, s: float, left: object, right: object, theme: Theme, flags1: list[tuple[Path, str]], flags2: list[tuple[Path, str]]) -> Image.Image:
-    col_w = w // 2
-    pad_x = int(16 * s)
-    pad_y = int(12 * s)
-    gap = int(6 * s)
-    font = _font(theme, max(16, int(22 * s)), bold=True)
-    tmp = ImageDraw.Draw(Image.new('RGB', (1,1)))
-    lh = _line_h(tmp, font)
-    flag_size = (max(22, int(34 * s)), max(14, int(22 * s)))
-
-    def prep(value, flags):
-        text = value if value not in (None, '', []) else '—'
-        lines = _wrap(tmp, text, font, col_w - pad_x * 2)
-        thumbs = [img for path, _ in flags if (img := _flag_thumb(path, flag_size, theme.panel_alt)) is not None]
-        flags_h = 0
-        row_width = 0
-        if thumbs:
-            x = 0
-            rows = 1
-            for thumb in thumbs:
-                if x and x + gap + thumb.width > col_w - pad_x * 2:
-                    rows += 1
-                    x = thumb.width
-                else:
-                    x = thumb.width if x == 0 else x + gap + thumb.width
-                row_width = max(row_width, x)
-            flags_h = rows * flag_size[1] + (rows - 1) * gap
-        text_h = len(lines) * lh
-        total_h = flags_h + (gap if thumbs and lines else 0) + text_h
-        return lines, thumbs, total_h
-
-    l_lines, l_thumbs, l_h = prep(left, flags1)
-    r_lines, r_thumbs, r_h = prep(right, flags2)
-    h = max(l_h, r_h) + pad_y * 2
-    img = Image.new('RGB', (w, h), theme.panel)
-    draw = ImageDraw.Draw(img)
-    bw = max(1, int(theme.border_width * s))
-    draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
-
-    def draw_block(x0, lines, thumbs, total_h):
-        y = (h - total_h) // 2
-        if thumbs:
-            row = []
-            row_w = 0
-            rows = []
-            for thumb in thumbs:
-                new_w = thumb.width if not row else row_w + gap + thumb.width
-                if row and new_w > col_w - pad_x * 2:
-                    rows.append((row, row_w))
-                    row = [thumb]
-                    row_w = thumb.width
-                else:
-                    row.append(thumb)
-                    row_w = new_w
-            if row:
-                rows.append((row, row_w))
-            for row, row_w in rows:
-                x = x0 + (col_w - row_w) // 2
-                for thumb in row:
-                    img.paste(thumb, (x, y))
-                    draw.rectangle((x, y, x + thumb.width - 1, y + thumb.height - 1), outline=theme.image_border, width=1)
-                    x += thumb.width + gap
-                y += flag_size[1] + gap
-            if lines:
-                y -= gap
-        _draw_lines(draw, lines, (x0 + pad_x, y), font, theme.text, lh, col_w - pad_x * 2, 'center')
-
-    draw_block(0, l_lines, l_thumbs, l_h)
-    draw_block(col_w, r_lines, r_thumbs, r_h)
-    return img
-
-
-def _battle_text_cells(w: int, s: float, left: object, right: object, theme: Theme) -> Image.Image:
-    col_w = w // 2
-    pad_x = int(16 * s)
-    pad_y = int(12 * s)
-    font = _font(theme, max(16, int(20 * s)))
-    tmp = ImageDraw.Draw(Image.new('RGB', (1,1)))
-    lh = _line_h(tmp, font)
-    left_text = left if left not in (None, '', []) else '—'
-    right_text = right if right not in (None, '', []) else '—'
-    left_lines = _wrap(tmp, left_text, font, col_w - pad_x * 2)
-    right_lines = _wrap(tmp, right_text, font, col_w - pad_x * 2)
-    h = max(len(left_lines) * lh, len(right_lines) * lh) + pad_y * 2
-    img = Image.new('RGB', (w, h), theme.panel)
-    draw = ImageDraw.Draw(img)
-    bw = max(1, int(theme.border_width * s))
-    draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
-    _draw_lines(draw, left_lines, (pad_x, pad_y), font, theme.text, lh)
-    _draw_lines(draw, right_lines, (col_w + pad_x, pad_y), font, theme.text, lh)
-    return img
-
-
-def _battle_blocks(page: Page, root: Path, inner_w: int, s: float, theme: Theme):
-    d = page.data
-    blocks = []
-    main, side1_flags, side2_flags, extras = _battle_media_items(d, root)
-    if main:
-        path, caption = main
-        pic = _picture(inner_w, s, path, caption, theme)
-        if pic:
-            blocks.append(pic)
-    for label, key in (("Дата", "date"), ("Место", "place"), ("Результат", "result")):
-        if d.get(key) not in (None, '', []):
-            blocks.append(_row(inner_w, s, label, d[key], theme))
-    if d.get('side_1') not in (None, '', []) or d.get('side_2') not in (None, '', []):
-        blocks.append(_section_title(inner_w, s, 'Стороны конфликта', theme))
-        blocks.append(_battle_side_cells(inner_w, s, d.get('side_1'), d.get('side_2'), theme, side1_flags, side2_flags))
-    for title, left_key, right_key in [
-        ('Командующие и лидеры', 'commander_1', 'commander_2'),
-        ('Силы', 'strength_1', 'strength_2'),
-        ('Потери', 'losses_1', 'losses_2'),
-    ]:
-        if d.get(left_key) not in (None, '', []) or d.get(right_key) not in (None, '', []):
-            blocks.append(_section_title(inner_w, s, title, theme))
-            blocks.append(_battle_text_cells(inner_w, s, d.get(left_key), d.get(right_key), theme))
-    if extras:
-        gallery = _gallery(inner_w, s, extras, theme)
-        if gallery:
-            blocks.append(_section_title(inner_w, s, 'Дополнительные изображения', theme))
-            blocks.append(gallery)
-    return blocks
-
-
 def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     font = _font(theme, max(17, int(22 * s)), bold=True, heading=True)
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -494,13 +328,15 @@ def _section_title(w: int, s: float, title: str, theme: Theme) -> Image.Image:
     pad_y = int(9 * s)
     lines = _wrap(tmp, title, font, w - pad_x * 2)
     lh = _line_h(tmp, font)
-    img = Image.new("RGB", (w, pad_y * 2 + lh * len(lines)), theme.section_bg)
+    bg = theme.panel if theme.key == "old_document" else theme.section_bg
+    img = Image.new("RGB", (w, pad_y * 2 + lh * len(lines)), bg)
     draw = ImageDraw.Draw(img)
-    _draw_lines(draw, lines, (pad_x, pad_y), font, theme.section_text, lh, w - pad_x * 2, "center")
+    align = "left" if theme.key == "old_document" else "center"
+    _draw_lines(draw, lines, (pad_x, pad_y), font, theme.section_text, lh, w - pad_x * 2, align)
     return img
 
 
-def _row(w: int, s: float, label: object, value: object, theme: Theme, alternate: bool = False) -> Image.Image:
+def _row(w: int, s: float, label: object, value: object, theme: Theme) -> Image.Image:
     label_w = int(w * 0.36)
     pad_x = int(15 * s)
     pad_y = int(11 * s)
@@ -512,10 +348,9 @@ def _row(w: int, s: float, label: object, value: object, theme: Theme, alternate
     lh1 = _line_h(tmp, label_font)
     lh2 = _line_h(tmp, value_font)
     h = max(len(left) * lh1, len(right) * lh2) + pad_y * 2
-    row_bg = theme.panel
-    img = Image.new("RGB", (w, h), row_bg)
+    img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
-    label_bg = row_bg if theme.key == "aurelia" else theme.panel_alt
+    label_bg = theme.panel if theme.key == "old_document" else theme.panel_alt
     draw.rectangle((0, 0, label_w, h), fill=label_bg)
     draw.line(
         (label_w, 0, label_w, h),
@@ -576,6 +411,86 @@ def _side_rows(w: int, s: float, fields: list[Field], data: dict, theme: Theme) 
     return img
 
 
+def _battle_side_rows(
+    w: int,
+    s: float,
+    data: dict,
+    root: Path,
+    theme: Theme,
+) -> Image.Image:
+    sides = battle_sides(data)
+    col_w = w // 2
+    pad = int(14 * s)
+    row_pad = int(7 * s)
+    gap = int(11 * s)
+    flag_w = int(54 * s)
+    flag_h = int(36 * s)
+    font = _font(theme, max(16, int(20 * s)))
+    tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lh = _line_h(tmp, font)
+    cols = [[], []]
+    heights = [pad * 2, pad * 2]
+
+    for i, side in enumerate(sides):
+        for member in side:
+            flag = None
+            path = _media_path(member.get("flag"), root)
+            if path:
+                try:
+                    flag = ImageOps.exif_transpose(Image.open(path))
+                    flag.load()
+                    flag.thumbnail((flag_w, flag_h), Image.Resampling.LANCZOS)
+                    if flag.mode in {"RGBA", "LA"}:
+                        base = Image.new("RGBA", flag.size, theme.panel_alt)
+                        base.alpha_composite(flag.convert("RGBA"))
+                        flag = base.convert("RGB")
+                    else:
+                        flag = flag.convert("RGB")
+                except Exception:
+                    flag = None
+            text_w = col_w - pad * 2
+            if flag:
+                text_w -= flag_w + gap
+            lines = _wrap(tmp, member["name"], font, max(40, text_w))
+            h = max(flag_h if flag else 0, len(lines) * lh) + row_pad * 2
+            cols[i].append((flag, lines, h))
+            heights[i] += h
+
+    h = max(max(heights), int(64 * s))
+    img = Image.new("RGB", (w, h), theme.panel)
+    draw = ImageDraw.Draw(img)
+    bw = max(1, int(theme.border_width * s))
+    draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
+
+    for i, items in enumerate(cols):
+        y = pad
+        left = i * col_w
+        for n, (flag, lines, item_h) in enumerate(items):
+            if n:
+                draw.line(
+                    (left + pad, y, left + col_w - pad, y),
+                    fill=theme.border,
+                    width=bw,
+                )
+            yy = y + row_pad
+            x = left + pad
+            if flag:
+                fx = x + (flag_w - flag.width) // 2
+                fy = yy + (item_h - row_pad * 2 - flag.height) // 2
+                img.paste(flag, (fx, fy))
+                draw.rectangle(
+                    (fx, fy, fx + flag.width - 1, fy + flag.height - 1),
+                    outline=theme.image_border,
+                    width=bw,
+                )
+                x += flag_w + gap
+            text_h = len(lines) * lh
+            ty = yy + (item_h - row_pad * 2 - text_h) // 2
+            _draw_lines(draw, lines, (x, ty), font, theme.text, lh)
+            y += item_h
+    return img
+
+
 def _description(w: int, s: float, value: object, theme: Theme) -> Image.Image:
     font = _font(theme, max(16, int(20 * s)))
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -608,7 +523,7 @@ def _footer(w: int, s: float, theme: Theme) -> Image.Image:
 
 
 def _standard_groups(tpl: Template, data: dict):
-    skip = {"card_type_label", "title", "description", "image_caption"}
+    skip = {"title", "description", "image_caption"}
     if tpl.subtitle_key:
         skip.add(tpl.subtitle_key)
     names = []
@@ -619,7 +534,7 @@ def _standard_groups(tpl: Template, data: dict):
         fields = [
             f for f in tpl.fields if f.section == name and f.key not in skip and data.get(f.key) not in (None, "", [])
         ]
-        if fields:
+        if fields or (tpl.key == "battle" and name == "Стороны" and any(battle_sides(data))):
             yield name, fields
 
 
@@ -633,6 +548,8 @@ def render_pillow(
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
     theme = get_theme(page.theme)
+    if theme.key == "old_document" and page.type != "country":
+        theme = get_theme("light")
     tpl = get_template(page.type)
     d = page.data
     s = PILLOW_SCALE.get(quality, PILLOW_SCALE["high"])
@@ -641,28 +558,24 @@ def render_pillow(
     inner_w = card_w - bw * 2
     blocks = [_header(inner_w, s, tpl, page, theme)]
 
-    row_index = 0
-    if tpl.key == "battle":
-        blocks.extend(_battle_blocks(page, root, inner_w, s, theme))
-    else:
-        media = []
-        for i, value in enumerate(page_images(d)):
-            media_path = _media_path(value, root)
-            if media_path:
-                media.append((media_path, image_caption(d, value, i)))
-        if media:
-            pic = _gallery(inner_w, s, media, theme)
-            if pic:
-                blocks.append(pic)
+    media = []
+    for i, value in enumerate(page_images(d)):
+        media_path = _media_path(value, root)
+        if media_path:
+            media.append((media_path, image_caption(d, value, i)))
+    if media:
+        pic = _gallery(inner_w, s, media, theme)
+        if pic:
+            blocks.append(pic)
 
-        for title, fields in _standard_groups(tpl, d):
-            blocks.append(_section_title(inner_w, s, title, theme))
-            if any(f.column for f in fields):
-                blocks.append(_side_rows(inner_w, s, fields, d, theme))
-            else:
-                for f in fields:
-                    row_index += 1
-                    blocks.append(_row(inner_w, s, f.label, d[f.key], theme, alternate=(row_index % 2 == 0)))
+    for title, fields in _standard_groups(tpl, d):
+        blocks.append(_section_title(inner_w, s, title, theme))
+        if tpl.key == "battle" and title == "Стороны":
+            blocks.append(_battle_side_rows(inner_w, s, d, root, theme))
+        elif any(f.column for f in fields):
+            blocks.append(_side_rows(inner_w, s, fields, d, theme))
+        else:
+            blocks.extend(_row(inner_w, s, f.label, d[f.key], theme) for f in fields)
 
     custom = [
         x
@@ -671,9 +584,7 @@ def render_pillow(
     ]
     if custom:
         blocks.append(_section_title(inner_w, s, "Дополнительные сведения", theme))
-        for x in custom:
-            row_index += 1
-            blocks.append(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(row_index % 2 == 0)))
+        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme) for x in custom)
 
     for sec in d.get("sections") or []:
         if not isinstance(sec, dict):
@@ -686,9 +597,7 @@ def render_pillow(
         if not rows:
             continue
         blocks.append(_section_title(inner_w, s, str(sec.get("title") or "Раздел"), theme))
-        for x in rows:
-            row_index += 1
-            blocks.append(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme, alternate=(row_index % 2 == 0)))
+        blocks.extend(_row(inner_w, s, x.get("name", "Поле"), x.get("value", ""), theme) for x in rows)
 
     if d.get("description"):
         blocks.append(_section_title(inner_w, s, "Описание", theme))
@@ -696,7 +605,8 @@ def render_pillow(
     if watermark:
         blocks.append(_footer(inner_w, s, theme))
 
-    outer = int(26 * s)
+    old_document = theme.key == "old_document"
+    outer = 0 if old_document else int(26 * s)
     content_h = sum(x.height for x in blocks) + bw * (len(blocks) - 1)
     img = Image.new("RGB", (card_w + outer * 2, content_h + outer * 2 + bw * 2), theme.background)
     draw = ImageDraw.Draw(img)
@@ -705,12 +615,16 @@ def render_pillow(
     draw.rectangle((x, y, x + card_w - 1, y + content_h + bw * 2 - 1), fill=theme.panel, outline=theme.border, width=bw)
     x += bw
     y += bw
+    rng = random.Random(paper_seed(d) ^ 0x51A1D) if old_document else None
     for i, block in enumerate(blocks):
-        img.paste(block, (x, y))
+        shift = rng.randint(-max(1, int(3 * s)), max(1, int(4 * s))) if rng and i else 0
+        img.paste(block, (x + shift, y))
         y += block.height
         if i < len(blocks) - 1:
             draw.line((x, y, x + inner_w - 1, y), fill=theme.border, width=bw)
             y += bw
 
     img.save(path, "PNG", compress_level=6, dpi=(144, 144))
+    if old_document:
+        finish_old_document(path, d)
     return path

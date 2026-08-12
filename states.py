@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from aiogram.fsm.state import State, StatesGroup
 
-from media import page_images, safe_unlink
+from media import page_media, safe_unlink
 
 if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
@@ -23,6 +23,9 @@ class NewPage(StatesGroup):
     custom_name = State()
     custom_value = State()
     section = State()
+    side_name = State()
+    side_flag = State()
+    paper_seed = State()
     quick = State()
 
 
@@ -33,12 +36,15 @@ class EditPage(StatesGroup):
     section = State()
     image = State()
     image_caption = State()
+    side_name = State()
+    side_flag = State()
+    paper_seed = State()
 
 
 async def clear_flow(state: FSMContext, user_id: int, db: Db, cfg: Config) -> None:
     d = await state.get_data()
     safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    for path in page_images(d.get("page_data") or {}):
+    for path in page_media(d.get("page_data") or {}):
         if await db.drop_unattached_media(path, user_id):
             safe_unlink(path, cfg.work_dir, "media_")
     await state.clear()

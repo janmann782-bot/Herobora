@@ -16,23 +16,28 @@ from db import Db
 from locales import tr
 from media import (
     MAX_PAGE_IMAGES,
+    MAX_SIDE_MEMBERS,
     BadImage,
+    battle_sides,
     image_caption,
+    page_media,
     page_images,
     safe_unlink,
     save_image,
     set_image_caption,
+    set_battle_sides,
     set_page_images,
 )
 from models import Page
+from paper import PAPER_COFFEE, ensure_paper, new_paper_seed, paper_status, seed_from_text
 from parser import parse_section
 from renderer import render_error_text, render_page
 from states import EditPage, clear_flow
 from templates import get_template
-from text_export import send_page_text
-from themes import THEMES, get_theme
+from themes import get_theme, theme_allowed
 from ui import (
     MY_PAGES,
+    battle_sides_kb,
     delete_kb,
     edit_value_kb,
     fields_kb,
@@ -40,10 +45,12 @@ from ui import (
     main_menu,
     page_actions_kb,
     page_image_kb,
+    paper_kb,
     pages_kb,
     progress_text,
     render_progress,
     send_png,
+    side_flag_kb,
     themes_kb,
 )
 
@@ -97,7 +104,13 @@ async def render_saved(
                     await wait.delete()
 
     caption = tr("page_caption", title=p.title, theme=get_theme(p.theme).name)
-    await send_png(msg, path, caption, None if document else page_actions_kb(p.id), document)
+    await send_png(
+        msg,
+        path,
+        caption,
+        None if document else page_actions_kb(p.id, p.type, p.theme),
+        document,
+    )
     return path
 
 
@@ -114,6 +127,16 @@ async def show_pages(msg: Message, db: Db, user_id: int) -> None:
         await msg.answer(tr("pages_empty"), reply_markup=main_menu())
         return
     await msg.answer(tr("pages_title"), reply_markup=pages_kb(pages))
+
+
+async def show_page_sides(msg: Message, state: FSMContext, p: Page) -> None:
+    sides = battle_sides(p.data)
+    await state.clear()
+    await state.update_data(page_id=p.id, side_i=None, member_i=None)
+    await msg.answer(
+        tr("sides_title", side_1=len(sides[0]), side_2=len(sides[1])),
+        reply_markup=battle_sides_kb(p.data, p.id),
+    )
 
 
 @router.message(Command("my_pages"))
@@ -154,6 +177,261 @@ async def edit_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
         tr("fields_title"),
         reply_markup=fields_kb(get_template(p.type), p.data, p.id),
     )
+
+
+@router.callback_query(F.data.startswith("p:s:"))
+async def open_page_sides(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    await clear_flow(state, q.from_user.id, db, cfg)
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    if p.type != "battle":
+        await q.message.answer(tr("battle_only"))
+        return
+    if "battle_sides" not in p.data:
+        set_battle_sides(p.data, battle_sides(p.data))
+        await db.update_page(p)
+    await show_page_sides(q.message, state, p)
+
+
+@router.callback_query(F.data.startswith("bp:"))
+async def page_side_action(
+    q: CallbackQuery,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    await q.answer()
+    parts = q.data.split(":")
+    if len(parts) < 3:
+        return
+    page_id = int(parts[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        await state.clear()
+        return
+    if p.type != "battle":
+        await q.message.answer(tr("battle_only"))
+        return
+    if parts[2] == "d":
+        await state.clear()
+        await render_saved(q.message, p, db, cfg)
+        return
+    if len(parts) < 4:
+        return
+
+    action = parts[2]
+    side_i = int(parts[3])
+    sides = battle_sides(p.data)
+    if side_i not in (0, 1):
+        return
+
+    if action == "a":
+        if len(sides[side_i]) >= MAX_SIDE_MEMBERS:
+            await q.message.answer(tr("side_limit", limit=MAX_SIDE_MEMBERS))
+            return
+        await state.update_data(page_id=page_id, side_i=side_i, member_i=None)
+        await state.set_state(EditPage.side_name)
+        await q.message.answer(
+            tr("side_name_prompt", side=side_i + 1),
+            reply_markup=edit_value_kb(f"p:s:{page_id}", f"p:o:{page_id}"),
+        )
+        return
+
+    if len(parts) != 5:
+        return
+    member_i = int(parts[4])
+    if not 0 <= member_i < len(sides[side_i]):
+        return
+
+    if action == "n":
+        await state.update_data(page_id=page_id, side_i=side_i, member_i=member_i)
+        await state.set_state(EditPage.side_name)
+        await q.message.answer(
+            tr("side_name_prompt", side=side_i + 1)
+            + "\n\n"
+            + tr("current_value", value=sides[side_i][member_i]["name"]),
+            reply_markup=edit_value_kb(f"p:s:{page_id}", f"p:o:{page_id}"),
+        )
+    elif action == "f":
+        member = sides[side_i][member_i]
+        await state.update_data(page_id=page_id, side_i=side_i, member_i=member_i)
+        await state.set_state(EditPage.side_flag)
+        await q.message.answer(
+            tr(
+                "side_flag_prompt",
+                name=member["name"],
+                max_mb=cfg.max_image_mb,
+            ),
+            reply_markup=side_flag_kb(bool(member.get("flag")), page_id),
+        )
+    elif action == "r":
+        member = sides[side_i].pop(member_i)
+        old = member.get("flag")
+        set_battle_sides(p.data, sides)
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        p.preview_path = None
+        await db.update_page(p)
+        if old and await db.drop_media_if_unused(old, q.from_user.id):
+            safe_unlink(old, cfg.work_dir, "media_")
+        await q.message.answer(tr("side_removed"))
+        await show_page_sides(q.message, state, p)
+
+
+@router.message(EditPage.side_name)
+async def take_page_side_name(
+    msg: Message,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    if not msg.text or not msg.text.strip():
+        await msg.answer(tr("empty_value"))
+        return
+    name = " ".join(msg.text.split())
+    if len(name) > 160:
+        await msg.answer(tr("too_long", limit=160))
+        return
+
+    d = await state.get_data()
+    page_id = int(d["page_id"])
+    p = await db.get_page(page_id, msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    sides = battle_sides(p.data)
+    side_i = int(d.get("side_i", -1))
+    member_i = d.get("member_i")
+    if side_i not in (0, 1):
+        await show_page_sides(msg, state, p)
+        return
+
+    if member_i is None:
+        if len(sides[side_i]) >= MAX_SIDE_MEMBERS:
+            await msg.answer(tr("side_limit", limit=MAX_SIDE_MEMBERS))
+            return
+        sides[side_i].append({"name": name, "flag": ""})
+    else:
+        member_i = int(member_i)
+        if not 0 <= member_i < len(sides[side_i]):
+            await show_page_sides(msg, state, p)
+            return
+        sides[side_i][member_i]["name"] = name
+
+    set_battle_sides(p.data, sides)
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await msg.answer(tr("side_name_saved"))
+    await show_page_sides(msg, state, p)
+
+
+@router.message(EditPage.side_flag)
+async def take_page_side_flag(
+    msg: Message,
+    state: FSMContext,
+    bot: Bot,
+    db: Db,
+    cfg: Config,
+) -> None:
+    d = await state.get_data()
+    page_id = int(d["page_id"])
+    p = await db.get_page(page_id, msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    sides = battle_sides(p.data)
+    side_i = int(d.get("side_i", -1))
+    member_i = int(d.get("member_i", -1))
+    if side_i not in (0, 1) or not 0 <= member_i < len(sides[side_i]):
+        await show_page_sides(msg, state, p)
+        return
+
+    f = msg.photo[-1] if msg.photo else msg.document
+    if not f:
+        await msg.answer(
+            tr("image_only"),
+            reply_markup=side_flag_kb(bool(sides[side_i][member_i].get("flag")), page_id),
+        )
+        return
+    size = getattr(f, "file_size", 0) or 0
+    if size > cfg.max_image_mb * 1024 * 1024:
+        await msg.answer(
+            tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
+            reply_markup=side_flag_kb(bool(sides[side_i][member_i].get("flag")), page_id),
+        )
+        return
+
+    buf = BytesIO()
+    try:
+        await bot.download(f, destination=buf)
+        info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
+    except BadImage as e:
+        await msg.answer(tr("image_bad", error=str(e)))
+        return
+    except Exception:
+        log.exception("saved side flag download failed for user %s", msg.from_user.id)
+        await msg.answer(tr("image_bad", error="не удалось скачать файл"))
+        return
+
+    old = sides[side_i][member_i].get("flag")
+    sides[side_i][member_i]["flag"] = info.path.name
+    set_battle_sides(p.data, sides)
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.add_media(
+        msg.from_user.id,
+        info.path.name,
+        info.width,
+        info.height,
+        p.id,
+        "side_flag",
+    )
+    await db.update_page(p)
+    if old and await db.drop_media_if_unused(old, msg.from_user.id):
+        safe_unlink(old, cfg.work_dir, "media_")
+    await msg.answer(tr("side_flag_saved"))
+    await show_page_sides(msg, state, p)
+
+
+@router.callback_query(EditPage.side_flag, F.data.startswith("pf:"))
+async def page_side_flag_action(
+    q: CallbackQuery,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    await q.answer()
+    _, raw_id, action = q.data.split(":")
+    page_id = int(raw_id)
+    p = await get_owned(q, db, page_id)
+    if not p:
+        await state.clear()
+        return
+    d = await state.get_data()
+    sides = battle_sides(p.data)
+    side_i = int(d.get("side_i", -1))
+    member_i = int(d.get("member_i", -1))
+    if side_i not in (0, 1) or not 0 <= member_i < len(sides[side_i]):
+        await show_page_sides(q.message, state, p)
+        return
+
+    if action == "rm":
+        old = sides[side_i][member_i].get("flag")
+        sides[side_i][member_i]["flag"] = ""
+        set_battle_sides(p.data, sides)
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        p.preview_path = None
+        await db.update_page(p)
+        if old and await db.drop_media_if_unused(old, q.from_user.id):
+            safe_unlink(old, cfg.work_dir, "media_")
+        await q.message.answer(tr("side_flag_removed"))
+
+    await show_page_sides(q.message, state, p)
 
 
 @router.callback_query(F.data.startswith("pe:"))
@@ -556,13 +834,125 @@ async def page_image_caption_action(
     await q.message.answer(text, reply_markup=page_image_kb(page_id, len(images)))
 
 
+def page_paper_text(data: dict) -> str:
+    seed, brightness, coffee = paper_status(data)
+    return tr(
+        "paper_settings",
+        seed=seed,
+        brightness=brightness,
+        coffee="включен" if coffee else "отключен",
+    )
+
+
+@router.callback_query(F.data.startswith("p:paper:"))
+async def page_paper(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    if p.type != "country" or p.theme != "old_document":
+        await q.message.answer(tr("paper_only"))
+        return
+
+    before = (p.data.get("paper_seed"), p.data.get(PAPER_COFFEE))
+    ensure_paper(p.data)
+    if before != (p.data.get("paper_seed"), p.data.get(PAPER_COFFEE)):
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        p.preview_path = None
+        await db.update_page(p)
+    await state.clear()
+    await q.message.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
+
+
+@router.callback_query(F.data.startswith("pp:"))
+async def page_paper_action(
+    q: CallbackQuery,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    await q.answer()
+    _, raw_id, action = q.data.split(":")
+    page_id = int(raw_id)
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    if p.type != "country" or p.theme != "old_document":
+        await q.message.answer(tr("paper_only"))
+        return
+
+    ensure_paper(p.data)
+    if action == "input":
+        await state.clear()
+        await state.update_data(page_id=page_id)
+        await state.set_state(EditPage.paper_seed)
+        await q.message.answer(
+            tr("paper_seed_prompt"),
+            reply_markup=edit_value_kb(f"p:paper:{page_id}", f"p:o:{page_id}"),
+        )
+        return
+    if action == "new":
+        new_paper_seed(p.data)
+    elif action == "coffee":
+        p.data[PAPER_COFFEE] = not p.data[PAPER_COFFEE]
+    else:
+        return
+
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await q.message.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
+
+
+@router.message(EditPage.paper_seed)
+async def take_page_paper_seed(
+    msg: Message,
+    state: FSMContext,
+    db: Db,
+    cfg: Config,
+) -> None:
+    if not msg.text:
+        await msg.answer(tr("text_only"))
+        return
+    s = msg.text.strip()
+    if not s:
+        await msg.answer(tr("empty_value"))
+        return
+    if len(s) > 40:
+        await msg.answer(tr("too_long", limit=40))
+        return
+
+    d = await state.get_data()
+    p = await db.get_page(int(d.get("page_id") or 0), msg.from_user.id)
+    if not p:
+        await state.clear()
+        await msg.answer(tr("page_not_found"))
+        return
+    if p.type != "country" or p.theme != "old_document":
+        await state.clear()
+        await msg.answer(tr("paper_only"))
+        return
+
+    p.data["paper_seed"] = seed_from_text(s)
+    p.data.setdefault(PAPER_COFFEE, True)
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await state.clear()
+    await msg.answer(page_paper_text(p.data), reply_markup=paper_kb(p.data, p.id))
+
+
 @router.callback_query(F.data.startswith("p:t:"))
 async def page_theme(q: CallbackQuery, db: Db) -> None:
     await q.answer()
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
-        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme), parse_mode="HTML")
+        await q.message.answer(
+            tr("choose_theme"),
+            reply_markup=themes_kb(f"pt:{page_id}", p.theme, p.type),
+        )
 
 
 @router.callback_query(F.data.startswith("pt:"))
@@ -576,22 +966,15 @@ async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
     if theme == "back":
         await render_saved(q.message, p, db, cfg)
         return
-    if theme not in THEMES:
+    if not theme_allowed(theme, p.type):
         return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")
     p.theme = theme
+    if theme == "old_document":
+        ensure_paper(p.data)
     p.preview_path = None
     await db.update_page(p)
     await render_saved(q.message, p, db, cfg)
-
-
-@router.callback_query(F.data.startswith("p:txt:"))
-async def text_page(q: CallbackQuery, db: Db) -> None:
-    await q.answer()
-    page_id = int(q.data.rsplit(":", 1)[1])
-    p = await get_owned(q, db, page_id)
-    if p:
-        await send_page_text(q.message, p, page_actions_kb(p.id))
 
 
 @router.callback_query(F.data.startswith("p:c:"))
@@ -602,7 +985,10 @@ async def copy_page(q: CallbackQuery, db: Db) -> None:
     if not p:
         await q.message.answer(tr("page_not_found"))
         return
-    await q.message.answer(tr("copied", title=p.title), reply_markup=page_actions_kb(p.id))
+    await q.message.answer(
+        tr("copied", title=p.title),
+        reply_markup=page_actions_kb(p.id, p.type, p.theme),
+    )
 
 
 @router.callback_query(F.data.startswith("p:x:"))
@@ -633,7 +1019,7 @@ async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
     ok = await db.delete_page(page_id, q.from_user.id)
     if ok:
         safe_unlink(p.preview_path, cfg.work_dir, "preview_")
-        for path in page_images(p.data):
+        for path in page_media(p.data):
             if await db.drop_media_if_unused(path, q.from_user.id):
                 safe_unlink(path, cfg.work_dir, "media_")
         await state.clear()

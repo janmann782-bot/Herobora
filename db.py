@@ -6,6 +6,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from media import page_media
 from models import Page, UserSettings
 
 
@@ -78,22 +79,6 @@ class Db:
                     watermark INTEGER NOT NULL DEFAULT 1,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
-
-                CREATE TABLE IF NOT EXISTS generation_totals (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    total INTEGER NOT NULL DEFAULT 0
-                );
-
-                CREATE TABLE IF NOT EXISTS user_generation_counts (
-                    user_id INTEGER PRIMARY KEY,
-                    total INTEGER NOT NULL DEFAULT 0,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS generation_milestones (
-                    milestone INTEGER PRIMARY KEY,
-                    reached_at TEXT NOT NULL
-                );
                 """
             )
             cols = {row[1] for row in conn.execute("PRAGMA table_info(user_settings)")}
@@ -101,9 +86,6 @@ class Db:
                 conn.execute(
                     "ALTER TABLE user_settings ADD COLUMN watermark INTEGER NOT NULL DEFAULT 1"
                 )
-            conn.execute(
-                "INSERT OR IGNORE INTO generation_totals(id, total) VALUES (1, 0)"
-            )
 
     async def touch_user(self, user_id: int, first_name: str = "", username: str = "") -> None:
         await asyncio.to_thread(self._touch_user, user_id, first_name, username)
@@ -306,8 +288,7 @@ class Db:
                     d = json.loads(row["data"])
                 except (TypeError, json.JSONDecodeError):
                     continue
-                images = d.get("images") or []
-                if d.get("image") == path or path in images:
+                if path in page_media(d):
                     return False
             conn.execute(
                 "DELETE FROM uploaded_media WHERE path = ? AND owner_id = ?",
@@ -356,75 +337,3 @@ class Db:
                 """,
                 (s.user_id, s.theme, s.language, s.quality, s.export_format, int(s.watermark)),
             )
-
-    @staticmethod
-    def _is_generation_milestone(total: int) -> bool:
-        """100, 500, 1k, 5k, 10k, 50k ..."""
-        if total < 100:
-            return False
-        n = total
-        while n % 10 == 0:
-            n //= 10
-        return n in {1, 5}
-
-    async def count_generation(self, user_id: int) -> tuple[int, int, int | None]:
-        return await asyncio.to_thread(self._count_generation, user_id)
-
-    def _count_generation(self, user_id: int) -> tuple[int, int, int | None]:
-        ts = now()
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "INSERT OR IGNORE INTO users(id, first_name, username, created_at) VALUES (?, '', '', ?)",
-                (user_id, ts),
-            )
-            conn.execute(
-                "INSERT OR IGNORE INTO generation_totals(id, total) VALUES (1, 0)"
-            )
-            conn.execute("UPDATE generation_totals SET total = total + 1 WHERE id = 1")
-            conn.execute(
-                """
-                INSERT INTO user_generation_counts(user_id, total) VALUES (?, 1)
-                ON CONFLICT(user_id) DO UPDATE SET total = total + 1
-                """,
-                (user_id,),
-            )
-            total = int(
-                conn.execute("SELECT total FROM generation_totals WHERE id = 1").fetchone()["total"]
-            )
-            user_total = int(
-                conn.execute(
-                    "SELECT total FROM user_generation_counts WHERE user_id = ?", (user_id,)
-                ).fetchone()["total"]
-            )
-            milestone = None
-            if self._is_generation_milestone(total):
-                cur = conn.execute(
-                    "INSERT OR IGNORE INTO generation_milestones(milestone, reached_at) VALUES (?, ?)",
-                    (total, ts),
-                )
-                if cur.rowcount:
-                    milestone = total
-        return total, user_total, milestone
-
-    async def get_generation_stats(self, user_id: int) -> tuple[int, int]:
-        return await asyncio.to_thread(self._get_generation_stats, user_id)
-
-    def _get_generation_stats(self, user_id: int) -> tuple[int, int]:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT total FROM generation_totals WHERE id = 1"
-            ).fetchone()
-            own = conn.execute(
-                "SELECT total FROM user_generation_counts WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        return int(row["total"] if row else 0), int(own["total"] if own else 0)
-
-    async def get_all_user_ids(self) -> list[int]:
-        return await asyncio.to_thread(self._get_all_user_ids)
-
-    def _get_all_user_ids(self) -> list[int]:
-        with self._connect() as conn:
-            rows = conn.execute("SELECT id FROM users ORDER BY id").fetchall()
-        return [int(row["id"]) for row in rows]
-
