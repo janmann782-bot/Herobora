@@ -28,6 +28,10 @@ TYPE_ALIASES = {
 
 ALIASES = {
     "название": "title",
+    "надпись типа в карточке": "card_type_label",
+    "тип в карточке": "card_type_label",
+    "название типа в карточке": "card_type_label",
+    "шапка типа": "card_type_label",
     "имя": "title",
     "официальное название": "official_name",
     "альтернативное название": "alt_name",

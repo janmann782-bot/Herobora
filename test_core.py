@@ -186,6 +186,24 @@ class DbTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((saved.theme, saved.quality), ("aurelia", "ultra"))
         self.assertFalse(saved.watermark)
 
+    async def test_generation_stats_and_milestone(self):
+        total, own, milestone = await self.db.count_generation(101)
+        self.assertEqual((total, own, milestone), (1, 1, None))
+        total, own, milestone = await self.db.count_generation(101)
+        self.assertEqual((total, own, milestone), (2, 2, None))
+        total, own = await self.db.get_generation_stats(101)
+        self.assertEqual((total, own), (2, 2))
+
+        with sqlite3.connect(self.db.path) as conn:
+            conn.execute("UPDATE generation_totals SET total = 99 WHERE id = 1")
+        total, own, milestone = await self.db.count_generation(202)
+        self.assertEqual(total, 100)
+        self.assertEqual(own, 1)
+        self.assertEqual(milestone, 100)
+        self.assertTrue(Db._is_generation_milestone(500))
+        self.assertTrue(Db._is_generation_milestone(1000))
+        self.assertFalse(Db._is_generation_milestone(2000))
+
     async def test_only_owner_can_drop_unattached_media(self):
         await self.db.add_media(12, "media_12_random.webp", 100, 100)
         self.assertFalse(await self.db.drop_unattached_media("media_12_random.webp", 13))
@@ -332,6 +350,16 @@ class MediaTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Подпись два", s)
             self.assertNotIn("sheet::before", s)
 
+
+
+    def test_custom_card_type_label_and_hide(self):
+        p = Page(owner_id=1, type="country", title="Тест", data={"title": "Тест", "card_type_label": "Кукуруза"})
+        html = make_html(p)
+        self.assertIn("КУКУРУЗА", html)
+
+        p.data["card_type_label"] = "скрыть"
+        html = make_html(p)
+        self.assertNotIn('class="kind">', html)
 
 class RendererSmokeTest(unittest.IsolatedAsyncioTestCase):
     async def test_pillow_fallback_png(self):

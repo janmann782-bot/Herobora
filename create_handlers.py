@@ -29,6 +29,7 @@ from models import Page
 from parser import ParsedPage, parse_section, parse_text
 from renderer import render_error_text, render_page
 from states import NewPage, clear_flow
+from stats import spawn_milestone_broadcast
 from templates import get_template
 from text_export import send_page_text
 from themes import get_theme
@@ -135,6 +136,15 @@ async def show_preview(
         )
         p.preview_path = path.name
         await state.update_data(preview_path=path.name)
+
+        # Новая карточка считается один раз при первом успешном рендере.
+        # Сохранение не требуется, а повторные предпросмотры этот счётчик не крутят.
+        if not d.get("generation_counted"):
+            _, _, milestone = await db.count_generation(user_id)
+            await state.update_data(generation_counted=True)
+            if milestone is not None:
+                spawn_milestone_broadcast(bot, db, milestone)
+
         await state.set_state(NewPage.review)
         await send_png(
             msg,
@@ -200,6 +210,7 @@ async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
         preview_path=None,
         max_image_mb=cfg.max_image_mb,
         creation_log_sent=False,
+        generation_counted=False,
     )
     await state.set_state(NewPage.field)
     await ask_field(q.message, state)
@@ -821,5 +832,6 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
         quick_text=quick_text,
         max_image_mb=cfg.max_image_mb,
         creation_log_sent=False,
+        generation_counted=False,
     )
     await show_quick(msg, state)

@@ -25,6 +25,7 @@ MY_PAGES = "📚 Мои страницы"
 THEMES_BTN = "🎨 Темы"
 SETTINGS = "⚙️ Настройки"
 HELP = "ℹ️ Помощь"
+STATS = "🥰Статистика"
 T = TypeVar("T")
 
 
@@ -37,7 +38,7 @@ def main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=CREATE), KeyboardButton(text=MY_PAGES)],
             [KeyboardButton(text=THEMES_BTN), KeyboardButton(text=SETTINGS)],
-            [KeyboardButton(text=HELP)],
+            [KeyboardButton(text=STATS), KeyboardButton(text=HELP)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Создать карточку или прислать данные текстом",

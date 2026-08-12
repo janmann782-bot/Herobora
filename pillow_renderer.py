@@ -13,6 +13,18 @@ from themes import Theme, get_theme
 PILLOW_SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
+
+
+def _resolve_kind_label(tpl: Template, data: dict) -> str:
+    value = str(data.get("card_type_label") or "").strip()
+    if not value:
+        return tpl.label.upper()
+    low = value.casefold().replace("ё", "е").strip()
+    if low in {"none", "hide", "hidden", "скрыть", "убрать", "нет", "off", "-"}:
+        return ""
+    return value.upper()
+
+
 def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
     here = Path(__file__).resolve().parent
     if theme.key == "aurelia":
@@ -149,23 +161,25 @@ def _header(w: int, s: float, tpl: Template, page: Page, theme: Theme) -> Image.
     pad = int(28 * s)
     title = page.data.get("title") or page.title or "Без названия"
     subtitle = page.data.get(tpl.subtitle_key, "") if tpl.subtitle_key else ""
-    kind = tpl.label.upper()
-    kind_lines = _wrap(draw, kind, kind_font, w - pad * 2)
+    kind = _resolve_kind_label(tpl, page.data)
+    kind_lines = _wrap(draw, kind, kind_font, w - pad * 2) if kind else []
     title_lines = _wrap(draw, title, title_font, w - pad * 2)
     sub_lines = _wrap(draw, subtitle, sub_font, w - pad * 2) if subtitle else []
     kh = _line_h(draw, kind_font)
     th = _line_h(draw, title_font)
     sh = _line_h(draw, sub_font)
     gap = int(7 * s)
-    h = pad + len(kind_lines) * kh + gap + len(title_lines) * th + pad
+    top_gap = gap if kind_lines else 0
+    h = pad + len(kind_lines) * kh + top_gap + len(title_lines) * th + pad
     if sub_lines:
         h += gap + len(sub_lines) * sh
 
     img = Image.new("RGB", (w, h), theme.panel_alt)
     draw = ImageDraw.Draw(img)
     y = pad
-    _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.accent, kh, w - pad * 2, "center")
-    y += len(kind_lines) * kh + gap
+    if kind_lines:
+        _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.accent, kh, w - pad * 2, "center")
+        y += len(kind_lines) * kh + gap
     _draw_lines(draw, title_lines, (pad, y), title_font, theme.text, th, w - pad * 2, "center")
     y += len(title_lines) * th
     if sub_lines:
@@ -594,7 +608,7 @@ def _footer(w: int, s: float, theme: Theme) -> Image.Image:
 
 
 def _standard_groups(tpl: Template, data: dict):
-    skip = {"title", "description", "image_caption"}
+    skip = {"card_type_label", "title", "description", "image_caption"}
     if tpl.subtitle_key:
         skip.add(tpl.subtitle_key)
     names = []

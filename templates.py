@@ -38,6 +38,7 @@ COUNTRY = Template(
     subtitle_key="official_name",
     wizard=("title", "official_name", "capital", "population", "government", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Название", "Основные сведения"),
         f("alt_name", "Альтернативное название", "Основные сведения"),
         f("official_name", "Официальное название", "Основные сведения"),
@@ -75,6 +76,7 @@ REGION = Template(
     subtitle_key="official_name",
     wizard=("title", "region_type", "country", "administrative_center", "population", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Название", "Основные сведения"),
         f("official_name", "Официальное название", "Основные сведения"),
         f("region_type", "Тип региона", "Основные сведения"),
@@ -108,6 +110,7 @@ BATTLE = Template(
     subtitle_key="part_of",
     wizard=("title", "part_of", "date", "place", "result", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Название", "Основные сведения"),
         f("part_of", "Часть войны", "Основные сведения"),
         f("image_caption", "Подпись изображения", "Основные сведения"),
@@ -135,6 +138,7 @@ PERSON = Template(
     subtitle_key="full_name",
     wizard=("title", "full_name", "birth_date", "position", "party", "description"),
     fields=(
+        f("card_type_label", "Надпись типа в карточке", "Основные сведения"),
         f("title", "Имя", "Основные сведения"),
         f("full_name", "Полное имя", "Основные сведения"),
         f("birth_date", "Дата рождения", "Биография"),

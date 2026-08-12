@@ -12,11 +12,13 @@ from db import Db
 from locales import tr
 from media import safe_unlink
 from states import clear_flow
+from stats import format_count
 from themes import THEMES, get_theme
 from ui import (
     CREATE,
     HELP,
     SETTINGS,
+    STATS,
     THEMES_BTN,
     main_menu,
     quality_kb,
@@ -76,6 +78,24 @@ async def create(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
 async def cancel(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
     await msg.answer(tr("cancelled"), reply_markup=main_menu())
+
+
+@router.message(Command("stats"))
+@router.message(F.text == STATS)
+async def statistics(msg: Message, db: Db) -> None:
+    await db.touch_user(
+        msg.from_user.id,
+        msg.from_user.first_name or "",
+        msg.from_user.username or "",
+    )
+    total, own = await db.get_generation_stats(msg.from_user.id)
+    await msg.answer(
+        "🥰 <b>Статистика</b>\n\n"
+        f"Всего генераций: <b>{format_count(total)}</b>\n"
+        f"Твои генерации: <b>{format_count(own)}</b>\n\n"
+        "<i>Считается первое успешное создание новой карточки даже если её потом не сохранять</i>",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("settings"))

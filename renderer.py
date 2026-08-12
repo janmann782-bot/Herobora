@@ -188,6 +188,18 @@ def battle_sections(data: dict, work_dir: str | Path) -> tuple[str, str]:
     return gallery, body
 
 
+
+
+def resolve_kind_label(tpl: Template, data: dict) -> str:
+    value = str(data.get("card_type_label") or "").strip()
+    if not value:
+        return f"{tpl.emoji} {tpl.label}"
+    low = value.casefold().replace("ё", "е").strip()
+    if low in {"none", "hide", "hidden", "скрыть", "убрать", "нет", "off", "-"}:
+        return ""
+    return value.upper()
+
+
 def row(label: str, value: object) -> str:
     return (
         '<div class="row">'
@@ -254,7 +266,7 @@ def standard_sections(tpl: Template, data: dict, work_dir: str | Path = ".") -> 
     if tpl.key == "battle":
         return battle_sections(data, work_dir)
 
-    skip = {"title", "description", "image_caption"}
+    skip = {"card_type_label", "title", "description", "image_caption"}
     if tpl.subtitle_key:
         skip.add(tpl.subtitle_key)
 
@@ -316,6 +328,8 @@ def make_html(
             gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
 
     subtitle_html = f'<div class="subtitle">{value_html(subtitle)}</div>' if subtitle else ""
+    kind_label = resolve_kind_label(tpl, d)
+    kind_html = f'<div class="kind">{esc(kind_label)}</div>' if kind_label else ""
     desc_html = ""
     if description:
         desc_html = (
@@ -390,7 +404,7 @@ section h2 {{
 </head>
 <body>
 <article class="sheet" id="infobox" data-theme="{esc(theme.key)}">
-  <header><div class="kind">{esc(tpl.emoji)} {esc(tpl.label)}</div><h1>{esc(title)}</h1>{subtitle_html}</header>
+  <header>{kind_html}<h1>{esc(title)}</h1>{subtitle_html}</header>
   {gallery}
   {body}
   {footer}
