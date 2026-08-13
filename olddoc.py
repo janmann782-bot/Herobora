@@ -55,6 +55,10 @@ def ensure_old_meta(data: dict) -> dict:
     if "_old_drunk" not in data:
         data["_old_drunk"] = False
     data["_old_drunk"] = bool(data.get("_old_drunk", False))
+    # drunk (tilted) flags off by default
+    if "_old_drunk_flags" not in data:
+        data["_old_drunk_flags"] = False
+    data["_old_drunk_flags"] = bool(data.get("_old_drunk_flags", False))
     return data
 
 
@@ -87,6 +91,12 @@ def toggle_drunk(data: dict) -> bool:
     ensure_old_meta(data)
     data["_old_drunk"] = not bool(data["_old_drunk"])
     return data["_old_drunk"]
+
+
+def toggle_drunk_flags(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_drunk_flags"] = not bool(data["_old_drunk_flags"])
+    return data["_old_drunk_flags"]
 
 
 def _rng(seed: int) -> random.Random:
@@ -150,65 +160,46 @@ def _line_h(draw: ImageDraw.ImageDraw, font) -> int:
 def _paper_bg(w: int, h: int, rng: random.Random, paper_index: int = 0) -> Image.Image:
     papers = [p for p in PAPERS if p.is_file()]
     if not papers:
-        img = Image.new("RGB", (w, h), (232, 220, 190))
-        return img
+        return Image.new("RGB", (w, h), (236, 226, 205))
 
     idx = paper_index % len(papers)
     src = Image.open(papers[idx]).convert("RGB")
     sw, sh = src.size
-    # cover canvas with slight random overscale / crop (natural frame)
-    scale = max(w / sw, h / sh) * (1.02 + rng.uniform(0.0, 0.08))
+    scale = max(w / sw, h / sh) * 1.04
     nw, nh = max(w + 2, int(sw * scale)), max(h + 2, int(sh * scale))
     src = src.resize((nw, nh), Image.Resampling.LANCZOS)
-    ox = rng.randint(0, max(0, nw - w))
-    oy = rng.randint(0, max(0, nh - h))
+    ox = max(0, (nw - w) // 2 + rng.randint(-8, 8))
+    oy = max(0, (nh - h) // 2 + rng.randint(-8, 8))
+    ox = min(ox, max(0, nw - w))
+    oy = min(oy, max(0, nh - h))
     img = src.crop((ox, oy, ox + w, oy + h))
 
-    # gentle tone — avoid plastic contrast
-    img = ImageEnhance.Brightness(img).enhance(rng.uniform(0.97, 1.04))
-    img = ImageEnhance.Contrast(img).enhance(rng.uniform(0.95, 1.08))
-    img = ImageEnhance.Color(img).enhance(rng.uniform(0.92, 1.05))
-    # warm paper bias
-    r, g, b = img.split()
-    r = r.point(lambda x: min(255, int(x * rng.uniform(1.0, 1.03))))
-    b = b.point(lambda x: max(0, int(x * rng.uniform(0.94, 0.99))))
-    img = Image.merge("RGB", (r, g, b))
-
-    # soft vignette (edges slightly darker) for depth
-    vig = Image.new("L", (w, h), 0)
-    vd = ImageDraw.Draw(vig)
-    margin = max(8, min(w, h) // 12)
-    vd.ellipse((margin, margin, w - margin, h - margin), fill=255)
-    vig = vig.filter(ImageFilter.GaussianBlur(radius=max(12, min(w, h) // 8)))
-    dark = ImageEnhance.Brightness(img).enhance(0.88)
-    img = Image.composite(img, dark, vig)
-
-    # very light film grain
-    grain = Image.effect_noise((w, h), rng.uniform(6, 12)).convert("L")
-    grain = Image.merge("RGB", (grain, grain, grain))
-    img = Image.blend(img, grain, 0.04)
+    # subtle tone only — no heavy "filter pack"
+    img = ImageEnhance.Brightness(img).enhance(rng.uniform(0.98, 1.03))
+    img = ImageEnhance.Contrast(img).enhance(rng.uniform(0.97, 1.05))
+    img = ImageEnhance.Color(img).enhance(rng.uniform(0.95, 1.02))
     return img
 
 
-def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Image:
-    """Hard irregular torn edge — no soapy soft feather."""
+def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 14) -> Image.Image:
+    """Subtle irregular edge — not a video-mapping stamp."""
     mask = Image.new("L", (w, h), 255)
     draw = ImageDraw.Draw(mask)
-    depth = max(10, depth)
+    depth = max(6, min(depth, 16))
 
     def edge_points(length: int, axis: str, side: str) -> list[tuple[int, int]]:
         pts = []
-        # dense steps → fiber-like jags, not smooth waves
-        step = max(3, length // 90)
-        n = max(8, length // step)
-        base = depth * 0.45
+        step = max(4, length // 70)
+        n = max(10, length // step)
         for i in range(n + 1):
             t = i / n
             pos = int(t * (length - 1))
-            # occasional deeper rips
-            spike = depth * rng.uniform(0.2, 1.15) if rng.random() < 0.22 else depth * rng.uniform(0.05, 0.45)
-            jitter = rng.uniform(-depth * 0.25, depth * 0.25)
-            off = int(max(2, min(depth + 6, base + spike + jitter)))
+            # mostly shallow, rare deeper nick
+            if rng.random() < 0.12:
+                off = int(depth * rng.uniform(0.55, 1.0))
+            else:
+                off = int(depth * rng.uniform(0.15, 0.45))
+            off = max(2, off)
             if axis == "x":
                 y = off if side == "top" else h - 1 - off
                 pts.append((pos, y))
@@ -224,10 +215,11 @@ def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Ima
         ("y", "right", (w - 1, 0), (w - 1, h - 1)),
     ):
         pts = edge_points(w if axis == "x" else h, axis, side)
-        poly = [corner_a] + pts + [corner_b]
-        draw.polygon(poly, fill=0)
+        draw.polygon([corner_a] + pts + [corner_b], fill=0)
 
-    # crisp binary edge — no soft soap halo
+    # 1px soften so edge is not jaggy CRT, still hard
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=0.6))
+    mask = mask.point(lambda v: 255 if v > 160 else 0)
     return mask
 
 
@@ -272,9 +264,9 @@ def _apply_stains(img: Image.Image, rng: random.Random, count: int = 1) -> Image
 
 
 def _ink_color(rng: random.Random) -> tuple[int, int, int]:
-    # dark brown / faded ink
-    base = rng.randint(28, 55)
-    return (base + rng.randint(10, 30), base + rng.randint(5, 20), base)
+    # stable dark ink — slight seed variation only
+    base = 36 + rng.randint(0, 8)
+    return (base + 8, base + 4, base)
 
 
 def _draw_text_messy(
@@ -352,8 +344,9 @@ def render_olddoc(
     stain_count = int(data.get("_old_stain_count", 1) or 0)
     if not bool(data.get("_old_stains", True)):
         stain_count = 0
-    paper_index = int(data.get("_old_paper", 0) or 0)
+    paper_index = int(data.get("_old_paper", 0) or 0) % max(1, paper_count())
     drunk = bool(data.get("_old_drunk", False))
+    drunk_flags = bool(data.get("_old_drunk_flags", False))
     rng = _rng(seed)
 
     def draw_lines(draw, lines, xy, font, fill, line_h, width=None, align="left", max_jitter=1.6):
@@ -439,19 +432,21 @@ def render_olddoc(
                         cx = (card_w - src.width) // 2
                     else:
                         cx = pad + i * (cell_w + gap) + (cell_w - src.width) // 2
-                    # slight tilt; alpha rotated NEAREST so no soapy white corners
-                    ang = rng.uniform(-2.8, 2.8)
-                    rgb = src.convert("RGB")
-                    alpha = src.split()[3] if src.mode == "RGBA" else Image.new("L", src.size, 255)
-                    rgb_r = rgb.rotate(ang, expand=True, resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0))
-                    a_r = alpha.rotate(ang, expand=True, resample=Image.Resampling.NEAREST, fillcolor=0)
-                    # kill any residual semi-transparent fringe from RGB bleed
-                    a_r = a_r.point(lambda v: 255 if v > 200 else 0)
-                    rotated = rgb_r.convert("RGBA")
-                    rotated.putalpha(a_r)
-                    ox = cx + rng.randint(-3, 3) - (rotated.width - src.width) // 2
-                    oy = yy + rng.randint(-2, 2) - (rotated.height - src.height) // 2
-                    gal.paste(rotated, (ox, oy), rotated)
+                    if drunk_flags:
+                        ang = rng.uniform(-3.5, 3.5)
+                        rgb = src.convert("RGB")
+                        alpha = src.split()[3] if src.mode == "RGBA" else Image.new("L", src.size, 255)
+                        rgb_r = rgb.rotate(ang, expand=True, resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0))
+                        a_r = alpha.rotate(ang, expand=True, resample=Image.Resampling.NEAREST, fillcolor=0)
+                        a_r = a_r.point(lambda v: 255 if v > 200 else 0)
+                        rotated = rgb_r.convert("RGBA")
+                        rotated.putalpha(a_r)
+                        ox = cx + rng.randint(-2, 2) - (rotated.width - src.width) // 2
+                        oy = yy + rng.randint(-2, 2) - (rotated.height - src.height) // 2
+                        gal.paste(rotated, (ox, oy), rotated)
+                    else:
+                        # clean, straight placement
+                        gal.paste(src, (cx, yy), src if src.mode == "RGBA" else None)
                     if cap:
                         lines = _wrap(tmp, cap, cap_font, cell_w - 8)
                         draw_lines(
@@ -480,9 +475,15 @@ def render_olddoc(
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         draw_lines(d, lines, (pad, int(10 * s)), sec_font, ink, _line_h(tmp, sec_font), content_w, "left", 1.5)
-        # underline
         uy = h - int(6 * s)
-        d.line((pad + rng.randint(-2, 2), uy, pad + content_w // 2 + rng.randint(-10, 20), uy + rng.randint(-1, 1)), fill=sep, width=max(1, int(s)))
+        if drunk:
+            d.line(
+                (pad + rng.randint(-2, 2), uy, pad + content_w // 2 + rng.randint(-8, 16), uy + rng.randint(-1, 1)),
+                fill=sep,
+                width=max(1, int(s)),
+            )
+        else:
+            d.line((pad, uy, pad + int(content_w * 0.42), uy), fill=sep, width=max(1, int(s)))
         return img
 
     def field_row(label: str, value: object) -> Image.Image:

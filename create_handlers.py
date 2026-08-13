@@ -864,6 +864,7 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
             cups=data.get("_old_stain_count", 1),
             paper=int(data.get("_old_paper", 0)) + 1,
             text="пьяный" if data.get("_old_drunk") else "обычный",
+            flags="пьяные" if data.get("_old_drunk_flags") else "обычные",
         ),
         reply_markup=olddoc_options_kb(
             None,
@@ -871,6 +872,7 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
             paper=int(data.get("_old_paper", 0)),
             paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
             drunk=bool(data.get("_old_drunk", False)),
+            drunk_flags=bool(data.get("_old_drunk_flags", False)),
         ),
     )
 
@@ -888,6 +890,7 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
         cycle_stain_count_step,
         cycle_paper,
         toggle_drunk,
+        toggle_drunk_flags,
         paper_count,
     )
     ensure_old_meta(data)
@@ -909,6 +912,9 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
     elif action == "text":
         drunk = toggle_drunk(data)
         msg = tr("olddoc_text_drunk" if drunk else "olddoc_text_normal")
+    elif action == "flags":
+        drunk = toggle_drunk_flags(data)
+        msg = tr("olddoc_flags_drunk" if drunk else "olddoc_flags_normal")
     else:
         return
     await state.update_data(page_data=data)
@@ -919,7 +925,7 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
 @router.callback_query(
     F.data.in_({
         "old:reseed", "old:cups", "old:cups_next", "old:cups_prev",
-        "old:paper", "old:paper_next", "old:paper_prev", "old:text",
+        "old:paper", "old:paper_next", "old:paper_prev", "old:text", "old:flags",
     })
 )
 async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:

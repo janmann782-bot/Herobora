@@ -131,9 +131,11 @@ def olddoc_options_kb(
     paper: int = 0,
     paper_total: int = 5,
     drunk: bool = False,
+    drunk_flags: bool = False,
 ) -> InlineKeyboardMarkup:
     paper_n = (paper % max(1, paper_total)) + 1
     text_label = f"🔤 Текст: {'пьяный' if drunk else 'обычный'}"
+    flags_label = f"🏳️ Флаги: {'пьяные' if drunk_flags else 'обычные'}"
     if page_id is None:
         pfx = "old"
         back = "draft:back"
@@ -155,6 +157,7 @@ def olddoc_options_kb(
             ib("▶️", f"{pfx}:cups_next"),
         ],
         [ib(text_label, f"{pfx}:text")],
+        [ib(flags_label, f"{pfx}:flags")],
         [ib(back_label, back)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

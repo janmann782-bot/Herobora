@@ -73,7 +73,8 @@ RU = {
         'Сид: {seed}\n'
         'Кружки: {cups}\n'
         'Бумага: {paper}\n'
-        'Текст: {text}\n\n'
+        'Текст: {text}\n'
+        'Флаги: {flags}\n\n'
         'Новый сид меняет разрывы, яркость и расположение кружек'
     ),
     'olddoc_reseeded': 'Новый вариант документа готов',
@@ -81,6 +82,8 @@ RU = {
     'olddoc_paper': 'Бумага: вариант {n}',
     'olddoc_text_normal': 'Текст: обычный',
     'olddoc_text_drunk': 'Текст: пьяный',
+    'olddoc_flags_normal': 'Флаги: обычные',
+    'olddoc_flags_drunk': 'Флаги: пьяные',
 }
 
 LOCALES = {"ru": RU}
