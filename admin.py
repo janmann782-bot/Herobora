@@ -5,14 +5,11 @@ import logging
 import os
 from pathlib import Path
 
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.filters import BaseFilter, Command
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from config import Config
-from db import Db
-from locales import tr
-from ui import main_menu
 
 log = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -76,54 +73,40 @@ def set_maintenance(cfg: Config, on: bool) -> None:
 
 
 def maintenance_text() -> str:
-    return (
-        "⚙️ Бот временно на технических работах.\n"
-        "Попробуй позже — всё вернётся."
-    )
+    return "Бот на техработах пока не работает\nЗайди позже"
 
 
 @router.message(Command("admin"), AdminFilter())
 async def admin_help(msg: Message) -> None:
-    # Not in public command menu — only works if you type it
     await msg.answer(
-        "<b>Админ-команды</b> (скрыты из меню)\n\n"
+        "Админ команды (скрыты из меню)\n\n"
         "/maint — статус техработ\n"
-        "/maint_on — включить техработы (бот молчит для всех, кроме админов)\n"
-        "/maint_off — выключить техработы\n"
-        "/admin — эта справка",
-        parse_mode="HTML",
+        "/maint_on — включить техработы\n"
+        "/maint_off — выключить\n"
+        "/admin — эта справка"
     )
 
 
 @router.message(Command("maint"), AdminFilter())
 async def maint_status(msg: Message, cfg: Config) -> None:
     on = get_maintenance(cfg)
-    await msg.answer(
-        f"Техработы: <b>{'ВКЛ' if on else 'ВЫКЛ'}</b>",
-        parse_mode="HTML",
-    )
+    await msg.answer(f"Техработы: {'вкл' if on else 'выкл'}")
 
 
 @router.message(Command("maint_on"), AdminFilter())
 async def maint_on(msg: Message, cfg: Config) -> None:
     set_maintenance(cfg, True)
     log.warning("Maintenance ON by admin %s", msg.from_user.id if msg.from_user else "?")
-    await msg.answer(
-        "Техработы <b>включены</b>.\n"
-        "Обычные пользователи получают сообщение о работах.\n"
-        "Ты по-прежнему можешь пользоваться ботом.",
-        parse_mode="HTML",
-    )
+    await msg.answer("Техработы включены\nОстальным бот молчит тебе можно")
 
 
 @router.message(Command("maint_off"), AdminFilter())
 async def maint_off(msg: Message, cfg: Config) -> None:
     set_maintenance(cfg, False)
     log.warning("Maintenance OFF by admin %s", msg.from_user.id if msg.from_user else "?")
-    await msg.answer("Техработы <b>выключены</b>. Бот снова для всех.", parse_mode="HTML")
+    await msg.answer("Техработы выключены\nБот снова для всех")
 
 
-# Catch-all maintenance gate for non-admins — registered first on dispatcher
 async def maintenance_middleware(handler, event, data):
     cfg: Config | None = data.get("cfg")
     if cfg is None or not get_maintenance(cfg):
@@ -141,11 +124,10 @@ async def maintenance_middleware(handler, event, data):
     if is_admin(uid):
         return await handler(event, data)
 
-    # Block everyone else
     text = maintenance_text()
     try:
         if isinstance(event, CallbackQuery):
-            await event.answer("Техработы", show_alert=True)
+            await event.answer("техработы", show_alert=True)
             if event.message:
                 await event.message.answer(text)
         elif isinstance(event, Message):
