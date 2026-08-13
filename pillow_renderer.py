@@ -364,7 +364,7 @@ def _flag_thumb(path: Path, size: tuple[int, int], bg: str):
 
 
 def _battle_side_cells(w: int, s: float, left: object, right: object, theme: Theme, flags1: list[tuple[Path, str]], flags2: list[tuple[Path, str]]) -> Image.Image:
-    """Each side line is its own row: [flag] name — flags not stacked above text."""
+    """Each side line is its own row: [flag] name — flag before the matching line, text left-aligned."""
     col_w = w // 2
     pad_x = int(14 * s)
     pad_y = int(12 * s)
@@ -376,7 +376,7 @@ def _battle_side_cells(w: int, s: float, left: object, right: object, theme: The
     row_gap = max(4, int(5 * s))
 
     def side_rows(value, flags) -> list[tuple[object | None, list[str]]]:
-        """Pair flags with text lines (one flag per line when possible)."""
+        """One row per text line; flag matched by caption name. Leftover flags go to trailing lines (side title stays flagless)."""
         raw = value if value not in (None, "", []) else "—"
         if isinstance(raw, (list, tuple)):
             parts = [str(x).strip() for x in raw if str(x).strip()]
@@ -384,16 +384,39 @@ def _battle_side_cells(w: int, s: float, left: object, right: object, theme: The
             parts = [ln.strip() for ln in str(raw).splitlines() if ln.strip()]
         if not parts:
             parts = ["—"]
-        thumbs = [img for path, _ in flags if (img := _flag_thumb(path, flag_size, theme.panel_alt)) is not None]
+
+        by_name: dict[str, object] = {}
+        ordered: list[object] = []
+        for path, cap in flags:
+            thumb = _flag_thumb(path, flag_size, theme.panel_alt)
+            if thumb is None:
+                continue
+            ordered.append(thumb)
+            key = str(cap or "").strip().casefold()
+            if key and key not in by_name:
+                by_name[key] = thumb
+
+        named_matches = {p.casefold() for p in parts if p.casefold() in by_name}
+        leftover = [t for t in ordered if t not in {by_name[k] for k in named_matches}]
+        trailing_slots = [i for i, p in enumerate(parts) if p.casefold() not in named_matches]
+        assign_idx: dict[int, object] = {}
+        for slot, thumb in zip(reversed(trailing_slots), reversed(leftover)):
+            assign_idx[slot] = thumb
+
         rows: list[tuple[object | None, list[str]]] = []
-        n = max(len(parts), len(thumbs), 1)
-        for i in range(n):
-            thumb = thumbs[i] if i < len(thumbs) else None
-            if i < len(parts):
-                text_max = col_w - pad_x * 2 - ((thumb.width + gap) if thumb is not None else 0)
-                lines = _wrap(tmp, parts[i], font, max(40, text_max))
-            else:
-                lines = []
+        used: set[int] = set()
+        for i, part in enumerate(parts):
+            key = part.casefold()
+            thumb = by_name.get(key) if key in named_matches else assign_idx.get(i)
+            if thumb is not None:
+                for j, t in enumerate(ordered):
+                    if t is thumb and j not in used:
+                        used.add(j)
+                        break
+                else:
+                    thumb = None
+            text_max = col_w - pad_x * 2 - ((thumb.width + gap) if thumb is not None else 0)
+            lines = _wrap(tmp, part, font, max(40, text_max))
             rows.append((thumb, lines))
         return rows
 

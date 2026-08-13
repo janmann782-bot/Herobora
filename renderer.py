@@ -87,15 +87,15 @@ def font_css() -> str:
 
 
 
-def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | None, list[str], list[str], list[tuple[str, str]]]:
+def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | None, list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
     main_item, side1_items, side2_items, extra_items = battle_image_groups(data)
 
-    def to_uri_list(items: list[tuple[str, str]]) -> list[str]:
+    def to_uri_list(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
         out = []
-        for path, _ in items:
+        for path, cap in items:
             uri = image_uri(path, work_dir)
             if uri:
-                out.append(uri)
+                out.append((uri, cap))
         return out
 
     main = None
@@ -111,22 +111,49 @@ def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | No
     return main, to_uri_list(side1_items), to_uri_list(side2_items), extras
 
 
-def battle_flags_row(flag_uris: list[str]) -> str:
-    if not flag_uris:
-        return ""
-    return "<div class=\"mini-flag-row\">" + "".join(
-        f'<img class=\"mini-flag\" src=\"{uri}\" alt=\"\">' for uri in flag_uris
-    ) + "</div>"
-
-
-def battle_side_cell(value: object, flag_uris: list[str]) -> str:
+def battle_side_cell(value: object, flags: list[tuple[str, str]]) -> str:
+    """Each text line is its own row with matching flag in front; text left-aligned."""
     if value in (None, '', []):
-        value = '—'
+        parts = ["—"]
+    elif isinstance(value, (list, tuple)):
+        parts = [str(x).strip() for x in value if str(x).strip()] or ["—"]
+    else:
+        parts = [ln.strip() for ln in str(value).splitlines() if ln.strip()] or ["—"]
+
+    by_name: dict[str, str] = {}
+    ordered: list[str] = []
+    for uri, cap in flags:
+        ordered.append(uri)
+        key = str(cap or "").strip().casefold()
+        if key and key not in by_name:
+            by_name[key] = uri
+
+    used_uris: set[str] = set()
+    # Prefer name match. For leftover flags, assign to trailing lines (side title stays without flag).
+    named_matches = {p.casefold() for p in parts if p.casefold() in by_name}
+    leftover_flags = [u for u in ordered if u not in {by_name[k] for k in named_matches}]
+    trailing_slots = [i for i, p in enumerate(parts) if p.casefold() not in named_matches]
+    # assign leftover flags to the last N trailing slots
+    assign_idx = {}
+    for slot, uri in zip(reversed(trailing_slots), reversed(leftover_flags)):
+        assign_idx[slot] = uri
+
+    rows_html = []
+    for i, part in enumerate(parts):
+        key = part.casefold()
+        uri = by_name.get(key) if key in named_matches else assign_idx.get(i)
+        if uri is not None and uri in used_uris:
+            uri = None
+        if uri is not None:
+            used_uris.add(uri)
+        flag_html = f'<img class="mini-flag" src="{uri}" alt="">' if uri else ""
+        rows_html.append(
+            f'<div class="side-row">{flag_html}<div class="battle-text">{value_html(part)}</div></div>'
+        )
     return (
         '<div class="battle-cell battle-side-name">'
-        f'{battle_flags_row(flag_uris)}'
-        f'<div class="battle-text">{value_html(value)}</div>'
-        '</div>'
+        + "".join(rows_html)
+        + "</div>"
     )
 
 
@@ -136,7 +163,7 @@ def battle_text_cell(value: object) -> str:
     return f'<div class="battle-cell"><div class="battle-text">{value_html(value)}</div></div>'
 
 
-def battle_side_section(title: str, left: object, right: object, flags1: list[str], flags2: list[str]) -> str:
+def battle_side_section(title: str, left: object, right: object, flags1: list[tuple[str, str]], flags2: list[tuple[str, str]]) -> str:
     if left in (None, '', []) and right in (None, '', []):
         return ''
     return (
@@ -395,9 +422,16 @@ section h2 {{
 .battle-table {{ display: grid; grid-template-columns: 1fr 1fr; }}
 .battle-cell {{ min-width: 0; padding: 12px 16px 14px; overflow-wrap: anywhere; text-align: left; }}
 .battle-cell + .battle-cell {{ border-left: var(--border-width) solid var(--border); }}
-.battle-side-name {{ display: flex; align-items: center; justify-content: center; gap: 10px; text-align: center; font-weight: 700; font-size: 22px; min-height: 74px; }}
+.battle-side-name {{
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
+  gap: 8px; text-align: left; font-weight: 700; font-size: 20px; min-height: 0;
+}}
+.side-row {{
+  display: flex; flex-direction: row; align-items: center; gap: 10px;
+  text-align: left; justify-content: flex-start;
+}}
 .mini-flag {{ width: 34px; height: 22px; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--image-border); background: var(--panel-alt); }}
-.battle-text {{ min-width: 0; }}
+.battle-text {{ min-width: 0; text-align: left; }}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
 .footer {{ padding: 12px 18px; text-align: right; color: var(--text-secondary); background: var(--panel-alt); border-top: var(--border-width) solid var(--border); font-size: 13px; letter-spacing: .04em; }}
 </style>
