@@ -364,7 +364,7 @@ def _flag_thumb(path: Path, size: tuple[int, int], bg: str):
 
 
 def _battle_side_cells(w: int, s: float, left: object, right: object, theme: Theme, flags1: list[tuple[Path, str]], flags2: list[tuple[Path, str]]) -> Image.Image:
-    """Flags before side name (left of text), text left-aligned — not stacked/centered."""
+    """Each side line is its own row: [flag] name — flags not stacked above text."""
     col_w = w // 2
     pad_x = int(14 * s)
     pad_y = int(12 * s)
@@ -373,35 +373,58 @@ def _battle_side_cells(w: int, s: float, left: object, right: object, theme: The
     lh = _line_h(tmp, font)
     flag_size = (max(28, int(40 * s)), max(18, int(26 * s)))
     gap = max(4, int(6 * s))
+    row_gap = max(4, int(5 * s))
 
-    def prep(value, flags):
+    def side_rows(value, flags) -> list[tuple[object | None, list[str]]]:
+        """Pair flags with text lines (one flag per line when possible)."""
+        raw = value if value not in (None, "", []) else "—"
+        if isinstance(raw, (list, tuple)):
+            parts = [str(x).strip() for x in raw if str(x).strip()]
+        else:
+            parts = [ln.strip() for ln in str(raw).splitlines() if ln.strip()]
+        if not parts:
+            parts = ["—"]
         thumbs = [img for path, _ in flags if (img := _flag_thumb(path, flag_size, theme.panel_alt)) is not None]
-        flags_w = 0
-        if thumbs:
-            flags_w = sum(t.width for t in thumbs) + gap * (len(thumbs) - 1) + gap
-        text_max = max(40, col_w - pad_x * 2 - flags_w)
-        text = value if value not in (None, "", []) else "—"
-        lines = _wrap(tmp, text, font, text_max)
-        text_h = max(1, len(lines)) * lh
-        flags_h = max((t.height for t in thumbs), default=0)
-        total_h = max(flags_h, text_h)
-        return lines, thumbs, flags_w, total_h
+        rows: list[tuple[object | None, list[str]]] = []
+        n = max(len(parts), len(thumbs), 1)
+        for i in range(n):
+            thumb = thumbs[i] if i < len(thumbs) else None
+            if i < len(parts):
+                text_max = col_w - pad_x * 2 - ((thumb.width + gap) if thumb is not None else 0)
+                lines = _wrap(tmp, parts[i], font, max(40, text_max))
+            else:
+                lines = []
+            rows.append((thumb, lines))
+        return rows
 
-    l_lines, l_thumbs, l_fw, l_h = prep(left, flags1)
-    r_lines, r_thumbs, r_fw, r_h = prep(right, flags2)
-    h = max(l_h, r_h) + pad_y * 2
+    def rows_height(rows) -> int:
+        h = 0
+        for i, (thumb, lines) in enumerate(rows):
+            th = thumb.height if thumb is not None else 0
+            text_h = len(lines) * lh if lines else 0
+            h += max(th, text_h, lh)
+            if i + 1 < len(rows):
+                h += row_gap
+        return h
+
+    l_rows = side_rows(left, flags1)
+    r_rows = side_rows(right, flags2)
+    content_h = max(rows_height(l_rows), rows_height(r_rows))
+    h = content_h + pad_y * 2
     img = Image.new("RGB", (w, h), theme.panel)
     draw = ImageDraw.Draw(img)
     bw = max(1, int(theme.border_width * s))
     draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
 
-    def draw_block(x0, lines, thumbs, flags_w, total_h):
-        y0 = (h - total_h) // 2
-        x = x0 + pad_x
-        # flags in a row before the name
-        if thumbs:
-            fy = y0 + max(0, (total_h - max(t.height for t in thumbs)) // 2)
-            for thumb in thumbs:
+    def draw_side(x0: int, rows) -> None:
+        y = pad_y
+        for thumb, lines in rows:
+            th = thumb.height if thumb is not None else 0
+            text_h = len(lines) * lh if lines else 0
+            row_h = max(th, text_h, lh)
+            x = x0 + pad_x
+            if thumb is not None:
+                fy = y + max(0, (row_h - thumb.height) // 2)
                 img.paste(thumb, (x, fy))
                 draw.rectangle(
                     (x, fy, x + thumb.width - 1, fy + thumb.height - 1),
@@ -409,13 +432,14 @@ def _battle_side_cells(w: int, s: float, left: object, right: object, theme: The
                     width=1,
                 )
                 x += thumb.width + gap
-        text_x = x if thumbs else x0 + pad_x
-        text_w = col_w - (text_x - x0) - pad_x
-        ty = y0 + max(0, (total_h - len(lines) * lh) // 2)
-        _draw_lines(draw, lines, (text_x, ty), font, theme.text, lh, max(20, text_w), "left")
+            if lines:
+                ty = y + max(0, (row_h - len(lines) * lh) // 2)
+                text_w = col_w - (x - x0) - pad_x
+                _draw_lines(draw, lines, (x, ty), font, theme.text, lh, max(20, text_w), "left")
+            y += row_h + row_gap
 
-    draw_block(0, l_lines, l_thumbs, l_fw, l_h)
-    draw_block(col_w, r_lines, r_thumbs, r_fw, r_h)
+    draw_side(0, l_rows)
+    draw_side(col_w, r_rows)
     return img
 
 
