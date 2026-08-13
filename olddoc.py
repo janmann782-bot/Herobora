@@ -377,28 +377,48 @@ def _media_path(value: object, root: Path) -> Path | None:
     return p
 
 
-def _frame_panel(content: Image.Image, s: float, pad: int | None = None) -> Image.Image:
-    """Thick black frame around a content group (flags / info text)."""
+def _thin_panel(
+    content: Image.Image,
+    s: float,
+    width: int | None = None,
+    dim: bool = True,
+) -> Image.Image:
+    """Closed thin frame like light theme blocks + optional inner dim."""
     if content.mode != "RGBA":
         content = content.convert("RGBA")
     cw, ch = content.size
-    border = max(4, int(5 * s))
-    inner = max(10, int(14 * s)) if pad is None else pad
-    out_w = cw + (inner + border) * 2
-    out_h = ch + (inner + border) * 2
+    border = max(2, int(2.2 * s))
+    pad = max(6, int(8 * s))
+    out_w = width if width is not None else cw
+    inner_w = out_w - border * 2
+    # fit content width into panel
+    if cw > inner_w and cw > 0:
+        scale = inner_w / cw
+        content = content.resize((max(1, int(cw * scale)), max(1, int(ch * scale))), Image.Resampling.LANCZOS)
+        cw, ch = content.size
+    out_h = ch + border * 2 + pad * 2
     out = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+    if dim:
+        dim_layer = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+        dd = ImageDraw.Draw(dim_layer)
+        dd.rectangle(
+            (border, border, out_w - border - 1, out_h - border - 1),
+            fill=(35, 26, 16, 40),
+        )
+        out = Image.alpha_composite(out, dim_layer)
     d = ImageDraw.Draw(out)
-    # solid outer black rectangle as frame ring
-    d.rectangle((0, 0, out_w - 1, out_h - 1), outline=(10, 8, 6, 255), width=border)
-    # weight the stroke
-    inset = max(1, border // 2)
-    d.rectangle(
-        (inset, inset, out_w - 1 - inset, out_h - 1 - inset),
-        outline=(10, 8, 6, 255),
-        width=max(2, border - 1),
-    )
-    out.paste(content, (border + inner, border + inner), content)
+    # closed border all sides
+    for i in range(border):
+        d.rectangle((i, i, out_w - 1 - i, out_h - 1 - i), outline=(28, 22, 16, 220))
+    ox = (out_w - cw) // 2
+    oy = border + pad
+    out.paste(content, (ox, oy), content)
     return out
+
+
+def _frame_panel(content: Image.Image, s: float, width: int | None = None, pad: int | None = None) -> Image.Image:
+    # alias kept for compatibility
+    return _thin_panel(content, s, width=width, dim=True)
 
 
 def _stack_blocks(blocks: list[Image.Image], width: int) -> Image.Image:
@@ -564,10 +584,22 @@ def render_olddoc(
 
     def section_title(text: str) -> Image.Image:
         lines = _wrap(tmp, text, sec_font, content_w)
-        h = int(10 * s) + len(lines) * _line_h(tmp, sec_font) + int(8 * s)
+        lh = _line_h(tmp, sec_font)
+        if show_window:
+            # light-theme style: full-width bar
+            pad_y = int(10 * s)
+            h = pad_y * 2 + lh * len(lines)
+            img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            # muted section strip (readable on paper)
+            d.rectangle((0, 0, card_w - 1, h - 1), fill=(55, 42, 28, 55))
+            d.rectangle((0, 0, card_w - 1, h - 1), outline=(40, 30, 20, 90), width=max(1, int(s)))
+            draw_lines(d, lines, (pad, pad_y), sec_font, ink, lh, content_w, "center", 1.2)
+            return img
+        h = int(10 * s) + len(lines) * lh + int(8 * s)
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        draw_lines(d, lines, (pad, int(10 * s)), sec_font, ink, _line_h(tmp, sec_font), content_w, "left", 1.5)
+        draw_lines(d, lines, (pad, int(10 * s)), sec_font, ink, lh, content_w, "left", 1.5)
         uy = h - int(6 * s)
         if drunk:
             d.line(
@@ -580,6 +612,32 @@ def render_olddoc(
         return img
 
     def field_row(label: str, value: object) -> Image.Image:
+        label_w = int(card_w * 0.36)
+        if show_window:
+            lab_lines = _wrap(tmp, label, label_font, label_w - pad)
+            val_lines = _wrap(tmp, value, value_font, card_w - label_w - pad)
+            pad_y = int(11 * s)
+            h = max(len(lab_lines) * lh_l, len(val_lines) * lh_v) + pad_y * 2
+            img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            # left cell mild fill + divider like light theme
+            d.rectangle((0, 0, label_w, h), fill=(40, 30, 20, 28))
+            bw = max(1, int(s))
+            d.line((label_w, 0, label_w, h), fill=(35, 28, 18, 140), width=bw)
+            d.line((0, h - 1, card_w - 1, h - 1), fill=(35, 28, 18, 100), width=bw)
+            draw_lines(d, lab_lines, (pad // 2, pad_y), label_font, ink_sec, lh_l, label_w - pad, "left", 1.2)
+            draw_lines(
+                d,
+                val_lines,
+                (label_w + pad // 2, pad_y),
+                value_font,
+                ink,
+                lh_v,
+                card_w - label_w - pad,
+                "left",
+                1.3,
+            )
+            return img
         lab_lines = _wrap(tmp, label, label_font, int(content_w * 0.38))
         val_lines = _wrap(tmp, value, value_font, int(content_w * 0.55))
         h = max(len(lab_lines) * lh_l, len(val_lines) * lh_v) + int(12 * s)
@@ -658,20 +716,20 @@ def render_olddoc(
     if media_parts:
         media_img = _stack_blocks(media_parts, card_w)
         if show_window:
-            media_img = _frame_panel(media_img, s)
+            media_img = _thin_panel(media_img, s, width=card_w, dim=True)
         body.append(media_img)
         body.append(Image.new("RGBA", (card_w, gap_y), (0, 0, 0, 0)))
 
     if info_parts:
         info_img = _stack_blocks(info_parts, card_w)
         if show_window:
-            info_img = _frame_panel(info_img, s)
+            info_img = _thin_panel(info_img, s, width=card_w, dim=True)
         body.append(info_img)
 
     body.extend(foot_parts)
 
     content_h = sum(b.height for b in body)
-    margin = int(28 * s)
+    margin = int(36 * s)
     total_w = card_w + margin * 2
     total_h = content_h + margin * 2
 
@@ -690,7 +748,7 @@ def render_olddoc(
         wash = ImageEnhance.Contrast(wash).enhance(1.06)
         composed = wash.convert("RGBA")
 
-    depth = int(22 * s) + rng.randint(4, 14)
+    depth = int(16 * s) + rng.randint(3, 10)
     mask = _torn_mask(total_w, total_h, rng, depth=depth)
     paper = composed.convert("RGBA")
     r, g, b, a = paper.split()
