@@ -845,6 +845,7 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
     await show_quick(msg, state)
 
 
+
 @router.callback_query(F.data == "draft:olddoc")
 async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
     await q.answer()
@@ -856,46 +857,53 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
     from olddoc import ensure_old_meta
     ensure_old_meta(data)
     await state.update_data(page_data=data)
-    stains = bool(data.get("_old_stains", True))
     await q.message.answer(
         tr(
             "olddoc_options",
             seed=data.get("_old_seed", 0),
-            stains="вкл" if stains else "выкл",
+            cups=data.get("_old_stain_count", 1),
+            paper=int(data.get("_old_paper", 0)) + 1,
+            text="пьяный" if data.get("_old_drunk") else "обычный",
         ),
-        reply_markup=olddoc_options_kb(None, stains),
+        reply_markup=olddoc_options_kb(
+            None,
+            stain_count=int(data.get("_old_stain_count", 1)),
+            paper=int(data.get("_old_paper", 0)),
+            drunk=bool(data.get("_old_drunk", False)),
+        ),
     )
 
 
-@router.callback_query(F.data == "old:reseed")
-async def draft_old_reseed(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
-    await q.answer()
+async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot, action: str) -> None:
     d = await state.get_data()
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
     data = d.get("page_data") or {}
-    from olddoc import ensure_old_meta, new_seed
+    from olddoc import ensure_old_meta, new_seed, cycle_stain_count, cycle_paper, toggle_drunk
     ensure_old_meta(data)
-    new_seed(data)
-    await state.update_data(page_data=data)
-    await q.message.answer(tr("olddoc_reseeded"))
-    await show_preview(q.message, state, db, cfg, bot, q.from_user)
-
-
-@router.callback_query(F.data == "old:stains")
-async def draft_old_stains(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
-    await q.answer()
-    d = await state.get_data()
-    if not d.get("type"):
-        await q.message.answer(tr("draft_missing"))
+    if action == "reseed":
+        new_seed(data)
+        msg = tr("olddoc_reseeded")
+    elif action == "cups":
+        n = cycle_stain_count(data)
+        msg = tr("olddoc_cups", count=n)
+    elif action == "paper":
+        n = cycle_paper(data)
+        msg = tr("olddoc_paper", n=n + 1)
+    elif action == "text":
+        drunk = toggle_drunk(data)
+        msg = tr("olddoc_text_drunk" if drunk else "olddoc_text_normal")
+    else:
         return
-    data = d.get("page_data") or {}
-    from olddoc import ensure_old_meta
-    ensure_old_meta(data)
-    data["_old_stains"] = not bool(data.get("_old_stains", True))
     await state.update_data(page_data=data)
-    on = data["_old_stains"]
-    await q.message.answer(tr("olddoc_stains_on" if on else "olddoc_stains_off"))
+    await q.message.answer(msg)
     await show_preview(q.message, state, db, cfg, bot, q.from_user)
+
+
+@router.callback_query(F.data.in_({"old:reseed", "old:cups", "old:paper", "old:text"}))
+async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
+    await q.answer()
+    action = q.data.split(":", 1)[1]
+    await _draft_old_apply(q, state, db, cfg, bot, action)
 

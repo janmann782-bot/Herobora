@@ -21,19 +21,54 @@ STAINS = [HERE / "stain1.png", HERE / "stain2.png"]
 SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
+STAIN_COUNT_MAX = 5
+PAPER_COUNT = 2
+
+
 def ensure_old_meta(data: dict) -> dict:
-    """Ensure seed and stains flag exist; mutate and return data."""
+    """Ensure old-document options exist; mutate and return data."""
     if "_old_seed" not in data:
         raw = f"{data.get('title', '')}|{random.randint(1, 10**9)}"
         data["_old_seed"] = int(hashlib.md5(raw.encode()).hexdigest()[:8], 16)
     if "_old_stains" not in data:
         data["_old_stains"] = True
+    # 0..STAIN_COUNT_MAX cups; if stains off, treated as 0 at render
+    if "_old_stain_count" not in data:
+        data["_old_stain_count"] = 1
+    data["_old_stain_count"] = max(0, min(STAIN_COUNT_MAX, int(data.get("_old_stain_count", 1) or 0)))
+    # paper variant index 0..PAPER_COUNT-1
+    if "_old_paper" not in data:
+        data["_old_paper"] = 0
+    data["_old_paper"] = int(data.get("_old_paper", 0) or 0) % PAPER_COUNT
+    # drunk (jittery) text off by default
+    if "_old_drunk" not in data:
+        data["_old_drunk"] = False
+    data["_old_drunk"] = bool(data.get("_old_drunk", False))
     return data
 
 
 def new_seed(data: dict) -> int:
     data["_old_seed"] = random.randint(1, 2**31 - 1)
     return data["_old_seed"]
+
+
+def cycle_stain_count(data: dict) -> int:
+    ensure_old_meta(data)
+    data["_old_stain_count"] = (int(data["_old_stain_count"]) + 1) % (STAIN_COUNT_MAX + 1)
+    data["_old_stains"] = data["_old_stain_count"] > 0
+    return data["_old_stain_count"]
+
+
+def cycle_paper(data: dict) -> int:
+    ensure_old_meta(data)
+    data["_old_paper"] = (int(data["_old_paper"]) + 1) % PAPER_COUNT
+    return data["_old_paper"]
+
+
+def toggle_drunk(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_drunk"] = not bool(data["_old_drunk"])
+    return data["_old_drunk"]
 
 
 def _rng(seed: int) -> random.Random:
@@ -94,13 +129,14 @@ def _line_h(draw: ImageDraw.ImageDraw, font) -> int:
     return int(_size(draw, "Аg", font)[1] * 1.38)
 
 
-def _paper_bg(w: int, h: int, rng: random.Random) -> Image.Image:
+def _paper_bg(w: int, h: int, rng: random.Random, paper_index: int = 0) -> Image.Image:
     papers = [p for p in PAPERS if p.is_file()]
     if not papers:
         img = Image.new("RGB", (w, h), (232, 220, 190))
         return img
 
-    src = Image.open(rng.choice(papers)).convert("RGB")
+    idx = paper_index % len(papers)
+    src = Image.open(papers[idx]).convert("RGB")
     # tile / cover
     sw, sh = src.size
     scale = max(w / sw, h / sh) * (1.0 + rng.uniform(0.02, 0.12))
@@ -182,17 +218,19 @@ def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Ima
     return mask
 
 
-def _apply_stains(img: Image.Image, rng: random.Random, count: int | None = None) -> Image.Image:
+def _apply_stains(img: Image.Image, rng: random.Random, count: int = 1) -> Image.Image:
+    """Place `count` cup stains of a fixed size (position/rotation still vary by seed)."""
     stains = [p for p in STAINS if p.is_file()]
-    if not stains:
+    if not stains or count <= 0:
         return img
     out = img.convert("RGBA")
     w, h = out.size
-    n = count if count is not None else rng.randint(1, 3)
-    for _ in range(n):
-        stain = Image.open(rng.choice(stains)).convert("RGBA")
-        # scale
-        scale = rng.uniform(0.18, 0.55) * min(w, h) / max(stain.size)
+    # fixed relative size of the cup ring
+    fixed_frac = 0.32
+    for i in range(count):
+        stain = Image.open(stains[i % len(stains)]).convert("RGBA")
+        target = max(40, int(min(w, h) * fixed_frac))
+        scale = target / max(stain.size)
         nw = max(20, int(stain.width * scale))
         nh = max(20, int(stain.height * scale))
         stain = stain.resize((nw, nh), Image.Resampling.LANCZOS)
@@ -200,19 +238,20 @@ def _apply_stains(img: Image.Image, rng: random.Random, count: int | None = None
             stain = stain.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
         if rng.random() < 0.5:
             stain = stain.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-        angle = rng.uniform(-40, 40)
-        stain = stain.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
-        # opacity
+        angle = rng.uniform(-35, 35)
+        # keep alpha hard on expand
+        rgb = stain.convert("RGB")
         alpha = stain.split()[3]
-        factor = rng.uniform(0.35, 0.85)
-        alpha = alpha.point(lambda x: int(x * factor))
-        stain.putalpha(alpha)
-        # brightness of stain
-        stain_rgb = ImageEnhance.Brightness(stain.convert("RGB")).enhance(rng.uniform(0.85, 1.15))
-        stain = Image.merge("RGBA", (*stain_rgb.split(), stain.split()[3]))
-
-        x = rng.randint(-nw // 4, max(0, w - nw * 3 // 4))
-        y = rng.randint(-nh // 4, max(0, h - nh * 3 // 4))
+        rgb_r = rgb.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0))
+        a_r = alpha.rotate(angle, expand=True, resample=Image.Resampling.NEAREST, fillcolor=0)
+        a_r = a_r.point(lambda v: 255 if v > 180 else 0)
+        # fixed-ish opacity
+        a_r = a_r.point(lambda v: int(v * 0.7) if v else 0)
+        stain = rgb_r.convert("RGBA")
+        stain.putalpha(a_r)
+        nw, nh = stain.size
+        x = rng.randint(-nw // 5, max(0, w - nw * 4 // 5))
+        y = rng.randint(-nh // 5, max(0, h - nh * 4 // 5))
         layer = Image.new("RGBA", out.size, (0, 0, 0, 0))
         layer.paste(stain, (x, y), stain)
         out = Image.alpha_composite(out, layer)
@@ -254,6 +293,7 @@ def _draw_lines_messy(
     width: int | None = None,
     align: str = "left",
     max_jitter: float = 1.6,
+    drunk: bool = False,
 ) -> None:
     x0, y = xy
     for line in lines:
@@ -261,11 +301,15 @@ def _draw_lines_messy(
         if width and align != "left":
             w = _size(draw, line, font)[0]
             xx = x0 + (width - w if align == "right" else (width - w) // 2)
-        # whole-line small offset
-        xx += int(rng.uniform(-2.5, 2.5))
-        yy = y + int(rng.uniform(-1.2, 1.2))
-        _draw_text_messy(draw, line, (xx, yy), font, fill, rng, max_jitter)
-        y += line_h + int(rng.uniform(-0.8, 1.5))
+        if drunk:
+            xx += int(rng.uniform(-2.5, 2.5))
+            yy = y + int(rng.uniform(-1.2, 1.2))
+            _draw_text_messy(draw, line, (xx, yy), font, fill, rng, max_jitter)
+            y += line_h + int(rng.uniform(-0.8, 1.5))
+        else:
+            # straight, sober text
+            draw.text((xx, y), line, font=font, fill=fill)
+            y += line_h
 
 
 def _media_path(value: object, root: Path) -> Path | None:
@@ -292,8 +336,15 @@ def render_olddoc(
     data = ensure_old_meta(dict(page.data))
     page.data = data  # keep seed stable for this render session
     seed = int(data["_old_seed"])
-    stains_on = bool(data.get("_old_stains", True))
+    stain_count = int(data.get("_old_stain_count", 1) or 0)
+    if not bool(data.get("_old_stains", True)):
+        stain_count = 0
+    paper_index = int(data.get("_old_paper", 0) or 0)
+    drunk = bool(data.get("_old_drunk", False))
     rng = _rng(seed)
+
+    def draw_lines(draw, lines, xy, font, fill, line_h, width=None, align="left", max_jitter=1.6):
+        _draw_lines_messy(draw, lines, xy, font, fill, line_h, rng, width, align, max_jitter, drunk=drunk)
 
     s = SCALE.get(quality, SCALE["high"])
     card_w = int(780 * s)
@@ -324,13 +375,13 @@ def render_olddoc(
     header = Image.new("RGBA", (card_w, hh), (0, 0, 0, 0))
     hd = ImageDraw.Draw(header)
     y = pad // 2
-    _draw_lines_messy(hd, kind_lines, (pad, y), kind_font, sep, kh, rng, content_w, "center", 1.2)
+    draw_lines(hd, kind_lines, (pad, y), kind_font, sep, kh, content_w, "center", 1.2)
     y += len(kind_lines) * kh + 8
-    _draw_lines_messy(hd, title_lines, (pad, y), title_font, ink, th, rng, content_w, "center", 2.0)
+    draw_lines(hd, title_lines, (pad, y), title_font, ink, th, content_w, "center", 2.0)
     y += len(title_lines) * th
     if sub_lines:
         y += 6
-        _draw_lines_messy(hd, sub_lines, (pad, y), sub_font, ink_sec, sh, rng, content_w, "center", 1.4)
+        draw_lines(hd, sub_lines, (pad, y), sub_font, ink_sec, sh, content_w, "center", 1.4)
     blocks.append(header)
 
     # --- images ---
@@ -390,14 +441,13 @@ def render_olddoc(
                     gal.paste(rotated, (ox, oy), rotated)
                     if cap:
                         lines = _wrap(tmp, cap, cap_font, cell_w - 8)
-                        _draw_lines_messy(
+                        draw_lines(
                             gd,
                             lines,
                             (cx, yy + src.height + int(6 * s)),
                             cap_font,
                             ink_sec,
                             lh,
-                            rng,
                             cell_w,
                             "center",
                             1.0,
@@ -416,7 +466,7 @@ def render_olddoc(
         h = int(10 * s) + len(lines) * _line_h(tmp, sec_font) + int(8 * s)
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        _draw_lines_messy(d, lines, (pad, int(10 * s)), sec_font, ink, _line_h(tmp, sec_font), rng, content_w, "left", 1.5)
+        draw_lines(d, lines, (pad, int(10 * s)), sec_font, ink, _line_h(tmp, sec_font), content_w, "left", 1.5)
         # underline
         uy = h - int(6 * s)
         d.line((pad + rng.randint(-2, 2), uy, pad + content_w // 2 + rng.randint(-10, 20), uy + rng.randint(-1, 1)), fill=sep, width=max(1, int(s)))
@@ -429,15 +479,14 @@ def render_olddoc(
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         col1 = int(content_w * 0.38)
-        _draw_lines_messy(d, lab_lines, (pad + rng.randint(-2, 3), int(6 * s)), label_font, ink_sec, lh_l, rng, col1, "left", 1.4)
-        _draw_lines_messy(
+        draw_lines(d, lab_lines, (pad, int(6 * s)), label_font, ink_sec, lh_l, col1, "left", 1.4)
+        draw_lines(
             d,
             val_lines,
-            (pad + col1 + int(12 * s) + rng.randint(-3, 4), int(6 * s) + rng.randint(-1, 2)),
+            (pad + col1 + int(12 * s), int(6 * s)),
             value_font,
             ink,
             lh_v,
-            rng,
             int(content_w * 0.55),
             "left",
             1.5,
@@ -484,7 +533,7 @@ def render_olddoc(
         h = int(8 * s) + len(lines) * lh + int(12 * s)
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        _draw_lines_messy(d, lines, (pad, int(8 * s)), desc_font, ink, lh, rng, content_w, "left", 1.3)
+        draw_lines(d, lines, (pad, int(8 * s)), desc_font, ink, lh, content_w, "left", 1.3)
         blocks.append(img)
 
     if watermark:
@@ -492,7 +541,7 @@ def render_olddoc(
         h = int(28 * s)
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        _draw_lines_messy(d, ["INFOBOX BOT"], (pad, int(6 * s)), wf, sep, _line_h(tmp, wf), rng, content_w, "right", 1.0)
+        draw_lines(d, ["INFOBOX BOT"], (pad, int(6 * s)), wf, sep, _line_h(tmp, wf), content_w, "right", 1.0)
         blocks.append(img)
 
     content_h = sum(b.height for b in blocks)
@@ -501,7 +550,7 @@ def render_olddoc(
     total_h = content_h + margin * 2
 
     # paper background
-    bg = _paper_bg(total_w, total_h, rng)
+    bg = _paper_bg(total_w, total_h, rng, paper_index=paper_index)
 
     # compose content
     canvas = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
@@ -512,8 +561,8 @@ def render_olddoc(
 
     # stains under or over text? typically on paper, semi-over
     composed = Image.alpha_composite(bg.convert("RGBA"), canvas)
-    if stains_on:
-        composed = _apply_stains(composed.convert("RGB"), rng).convert("RGBA")
+    if stain_count > 0:
+        composed = _apply_stains(composed.convert("RGB"), rng, count=stain_count).convert("RGBA")
 
     # torn edges + transparent outside the paper
     depth = int(14 * s) + rng.randint(0, 8)

@@ -647,6 +647,7 @@ async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
         await q.message.answer(tr("deleted"), reply_markup=main_menu())
 
 
+
 @router.callback_query(F.data.startswith("p:old:"))
 async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
     await q.answer()
@@ -656,19 +657,31 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
         return
     from olddoc import ensure_old_meta
     ensure_old_meta(p.data)
-    stains = bool(p.data.get("_old_stains", True))
     await q.message.answer(
         tr(
             "olddoc_options",
             seed=p.data.get("_old_seed", 0),
-            stains="вкл" if stains else "выкл",
+            cups=p.data.get("_old_stain_count", 1),
+            paper=int(p.data.get("_old_paper", 0)) + 1,
+            text="пьяный" if p.data.get("_old_drunk") else "обычный",
         ),
-        reply_markup=olddoc_options_kb(page_id, stains),
+        reply_markup=olddoc_options_kb(
+            page_id,
+            stain_count=int(p.data.get("_old_stain_count", 1)),
+            paper=int(p.data.get("_old_paper", 0)),
+            drunk=bool(p.data.get("_old_drunk", False)),
+        ),
     )
 
 
 @router.callback_query(
-    F.data.func(lambda d: isinstance(d, str) and d.startswith("old:") and d.count(":") == 2 and d.split(":")[1].isdigit())
+    F.data.func(
+        lambda d: isinstance(d, str)
+        and d.startswith("old:")
+        and d.count(":") == 2
+        and d.split(":")[1].isdigit()
+        and d.split(":")[2] in {"reseed", "cups", "paper", "text"}
+    )
 )
 async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
     parts = (q.data or "").split(":")
@@ -678,14 +691,20 @@ async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
     p = await get_owned(q, db, page_id)
     if not p:
         return
-    from olddoc import ensure_old_meta, new_seed
+    from olddoc import ensure_old_meta, new_seed, cycle_stain_count, cycle_paper, toggle_drunk
     ensure_old_meta(p.data)
     if action == "reseed":
         new_seed(p.data)
         msg = tr("olddoc_reseeded")
-    elif action == "stains":
-        p.data["_old_stains"] = not bool(p.data.get("_old_stains", True))
-        msg = tr("olddoc_stains_on" if p.data["_old_stains"] else "olddoc_stains_off")
+    elif action == "cups":
+        n = cycle_stain_count(p.data)
+        msg = tr("olddoc_cups", count=n)
+    elif action == "paper":
+        n = cycle_paper(p.data)
+        msg = tr("olddoc_paper", n=n + 1)
+    elif action == "text":
+        drunk = toggle_drunk(p.data)
+        msg = tr("olddoc_text_drunk" if drunk else "olddoc_text_normal")
     else:
         return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")

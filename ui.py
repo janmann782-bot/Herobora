@@ -124,20 +124,32 @@ def themes_kb(prefix: str, selected: str = "", page_type: str = "") -> InlineKey
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def olddoc_options_kb(page_id: int | None, stains: bool) -> InlineKeyboardMarkup:
-    stain_label = "☕️ Следы кружки: вкл" if stains else "☕️ Следы кружки: выкл"
+def olddoc_options_kb(
+    page_id: int | None,
+    *,
+    stain_count: int = 1,
+    paper: int = 0,
+    drunk: bool = False,
+) -> InlineKeyboardMarkup:
+    paper_names = ("1", "2")
+    paper_label = f"📄 Вид бумаги: {paper_names[paper % 2]}"
+    cups_label = f"☕️ Количество кружек (БЕТА): {stain_count}"
+    text_label = f"🔤 Текст: {'пьяный' if drunk else 'обычный'}"
     if page_id is None:
-        rows = [
-            [ib("🔄 Новый вариант (сид)", "old:reseed")],
-            [ib(stain_label, "old:stains")],
-            [ib("⬅️ К предпросмотру", "draft:back")],
-        ]
+        pfx = "old"
+        back = "draft:back"
+        back_label = "⬅️ К предпросмотру"
     else:
-        rows = [
-            [ib("🔄 Новый вариант (сид)", f"old:{page_id}:reseed")],
-            [ib(stain_label, f"old:{page_id}:stains")],
-            [ib("⬅️ К странице", f"p:o:{page_id}")],
-        ]
+        pfx = f"old:{page_id}"
+        back = f"p:o:{page_id}"
+        back_label = "⬅️ К странице"
+    rows = [
+        [ib("🔄 Новый вариант (сид)", f"{pfx}:reseed")],
+        [ib(cups_label, f"{pfx}:cups")],
+        [ib(paper_label, f"{pfx}:paper")],
+        [ib(text_label, f"{pfx}:text")],
+        [ib(back_label, back)],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
