@@ -314,9 +314,9 @@ def _apply_stains(img: Image.Image, rng: random.Random, count: int = 1) -> Image
 
 
 def _ink_color(rng: random.Random) -> tuple[int, int, int]:
-    # stable dark ink — slight seed variation only
-    base = 36 + rng.randint(0, 8)
-    return (base + 8, base + 4, base)
+    # dark readable ink on light paper
+    base = 22 + rng.randint(0, 6)
+    return (base + 6, base + 3, base)
 
 
 def _draw_text_messy(
@@ -377,53 +377,39 @@ def _media_path(value: object, root: Path) -> Path | None:
     return p
 
 
-def _draw_inner_window(base: Image.Image, margin: int, rng: random.Random) -> Image.Image:
-    """Darkened mat/window behind content area, soft edges."""
-    w, h = base.size
-    out = base.convert("RGBA")
-    # content rect slightly inside paper margin
-    pad = max(8, int(margin * 0.55))
-    x0, y0 = pad, pad
-    x1, y1 = w - pad, h - pad
-    if x1 - x0 < 40 or y1 - y0 < 40:
-        return out
+def _frame_panel(content: Image.Image, s: float, pad: int | None = None) -> Image.Image:
+    """Thick black frame around a content group (flags / info text)."""
+    if content.mode != "RGBA":
+        content = content.convert("RGBA")
+    cw, ch = content.size
+    border = max(4, int(5 * s))
+    inner = max(10, int(14 * s)) if pad is None else pad
+    out_w = cw + (inner + border) * 2
+    out_h = ch + (inner + border) * 2
+    out = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(out)
+    # solid outer black rectangle as frame ring
+    d.rectangle((0, 0, out_w - 1, out_h - 1), outline=(10, 8, 6, 255), width=border)
+    # weight the stroke
+    inset = max(1, border // 2)
+    d.rectangle(
+        (inset, inset, out_w - 1 - inset, out_h - 1 - inset),
+        outline=(10, 8, 6, 255),
+        width=max(2, border - 1),
+    )
+    out.paste(content, (border + inner, border + inner), content)
+    return out
 
-    # darken outside the inner window (mat)
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    # full dim
-    od.rectangle((0, 0, w, h), fill=(35, 28, 18, 55))
-    # cut hole with soft edge
-    hole = Image.new("L", (w, h), 0)
-    hd = ImageDraw.Draw(hole)
-    radius = max(6, margin // 3)
-    try:
-        hd.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
-    except Exception:
-        hd.rectangle((x0, y0, x1, y1), fill=255)
-    hole = hole.filter(ImageFilter.GaussianBlur(radius=max(2.5, margin * 0.12)))
-    # where hole is white → no overlay
-    inv = Image.eval(hole, lambda v: 255 - v)
-    dim = Image.new("RGBA", (w, h), (35, 28, 18, 55))
-    dim.putalpha(Image.eval(inv, lambda v: int(v * 0.55)))
-    out = Image.alpha_composite(out, dim)
 
-    # subtle inner panel lift (slightly lighter paper in window)
-    panel = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    lift = Image.new("RGBA", (w, h), (255, 248, 230, 28))
-    lift_mask = hole.point(lambda v: int(v * 0.9))
-    lift.putalpha(lift_mask)
-    out = Image.alpha_composite(out, lift)
-
-    # thin soft border line
-    border = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(border)
-    try:
-        bd.rounded_rectangle((x0, y0, x1, y1), radius=radius, outline=(60, 45, 30, 70), width=max(1, margin // 14))
-    except Exception:
-        bd.rectangle((x0, y0, x1, y1), outline=(60, 45, 30, 70), width=max(1, margin // 14))
-    border = border.filter(ImageFilter.GaussianBlur(radius=0.8))
-    out = Image.alpha_composite(out, border)
+def _stack_blocks(blocks: list[Image.Image], width: int) -> Image.Image:
+    if not blocks:
+        return Image.new("RGBA", (width, 1), (0, 0, 0, 0))
+    h = sum(b.height for b in blocks)
+    out = Image.new("RGBA", (width, max(1, h)), (0, 0, 0, 0))
+    y = 0
+    for b in blocks:
+        out.paste(b, (0, y), b if b.mode == "RGBA" else None)
+        y += b.height
     return out
 
 
@@ -464,7 +450,10 @@ def render_olddoc(
     ink_sec = tuple(min(255, c + 40) for c in ink)
     sep = tuple(min(255, c + 70) for c in ink)
 
-    blocks: list[Image.Image] = []
+    header_parts: list[Image.Image] = []
+    media_parts: list[Image.Image] = []
+    info_parts: list[Image.Image] = []
+    foot_parts: list[Image.Image] = []
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
     # --- header ---
@@ -492,7 +481,7 @@ def render_olddoc(
     if sub_lines:
         y += 6
         draw_lines(hd, sub_lines, (pad, y), sub_font, ink_sec, sh, content_w, "center", 1.4)
-    blocks.append(header)
+    header_parts.append(header)
 
     # --- images ---
     media_items = []
@@ -565,7 +554,7 @@ def render_olddoc(
                             1.0,
                         )
                 yy += rh + gap
-            blocks.append(gal)
+            media_parts.append(gal)
 
     label_font = _serif(max(13, int(15 * s)), bold=True)
     value_font = _serif(max(13, int(15 * s)))
@@ -623,15 +612,15 @@ def render_olddoc(
         fields = [f for f in tpl.fields if f.section == sec_name and f.key not in skip and data.get(f.key) not in (None, "", [])]
         if not fields:
             continue
-        blocks.append(section_title(sec_name))
+        info_parts.append(section_title(sec_name))
         for f in fields:
-            blocks.append(field_row(f.label, data[f.key]))
+            info_parts.append(field_row(f.label, data[f.key]))
 
     custom = [x for x in data.get("custom_fields") or [] if isinstance(x, dict) and x.get("value") not in (None, "")]
     if custom:
-        blocks.append(section_title("Дополнительные сведения"))
+        info_parts.append(section_title("Дополнительные сведения"))
         for x in custom:
-            blocks.append(field_row(str(x.get("name", "Поле")), x.get("value", "")))
+            info_parts.append(field_row(str(x.get("name", "Поле")), x.get("value", "")))
 
     for sec in data.get("sections") or []:
         if not isinstance(sec, dict):
@@ -639,12 +628,12 @@ def render_olddoc(
         rows = [x for x in sec.get("fields") or [] if isinstance(x, dict) and x.get("value") not in (None, "")]
         if not rows:
             continue
-        blocks.append(section_title(str(sec.get("title") or "Раздел")))
+        info_parts.append(section_title(str(sec.get("title") or "Раздел")))
         for x in rows:
-            blocks.append(field_row(str(x.get("name", "Поле")), x.get("value", "")))
+            info_parts.append(field_row(str(x.get("name", "Поле")), x.get("value", "")))
 
     if data.get("description"):
-        blocks.append(section_title("Описание"))
+        info_parts.append(section_title("Описание"))
         desc_font = _serif(max(13, int(15 * s)))
         lines = _wrap(tmp, data["description"], desc_font, content_w)
         lh = _line_h(tmp, desc_font)
@@ -652,7 +641,7 @@ def render_olddoc(
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         draw_lines(d, lines, (pad, int(8 * s)), desc_font, ink, lh, content_w, "left", 1.3)
-        blocks.append(img)
+        info_parts.append(img)
 
     if watermark:
         wf = _serif(max(11, int(12 * s)), italic=True)
@@ -660,27 +649,40 @@ def render_olddoc(
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         draw_lines(d, ["INFOBOX BOT"], (pad, int(6 * s)), wf, sep, _line_h(tmp, wf), content_w, "right", 1.0)
-        blocks.append(img)
+        foot_parts.append(img)
 
-    content_h = sum(b.height for b in blocks)
+    gap_y = int(10 * s)
+    body: list[Image.Image] = []
+    body.extend(header_parts)
+
+    if media_parts:
+        media_img = _stack_blocks(media_parts, card_w)
+        if show_window:
+            media_img = _frame_panel(media_img, s)
+        body.append(media_img)
+        body.append(Image.new("RGBA", (card_w, gap_y), (0, 0, 0, 0)))
+
+    if info_parts:
+        info_img = _stack_blocks(info_parts, card_w)
+        if show_window:
+            info_img = _frame_panel(info_img, s)
+        body.append(info_img)
+
+    body.extend(foot_parts)
+
+    content_h = sum(b.height for b in body)
     margin = int(28 * s)
     total_w = card_w + margin * 2
     total_h = content_h + margin * 2
 
-    # paper background
     bg = _paper_bg(total_w, total_h, rng, paper_index=paper_index)
-
-    # compose content
     canvas = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
     yy = margin
-    for b in blocks:
+    for b in body:
         canvas.paste(b, (margin, yy), b if b.mode == "RGBA" else None)
         yy += b.height
 
-    # stains under or over text? typically on paper, semi-over
     composed = Image.alpha_composite(bg.convert("RGBA"), canvas)
-    if show_window:
-        composed = _draw_inner_window(composed, margin, rng)
     if stain_count > 0:
         composed = _apply_stains(composed.convert("RGB"), rng, count=stain_count).convert("RGBA")
     if substances:
