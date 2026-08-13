@@ -74,7 +74,10 @@ RU = {
         'Кружки: {cups}\n'
         'Бумага: {paper}\n'
         'Текст: {text}\n'
-        'Флаги: {flags}\n\n'
+        'Флаги: {flags}\n'
+        'Под веществами: {sub}\n'
+        'Окошко: {window}\n'
+        'Обводка: {outline}\n\n'
         'Новый сид меняет разрывы, яркость и расположение кружек'
     ),
     'olddoc_reseeded': 'Новый вариант документа готов',
@@ -84,6 +87,12 @@ RU = {
     'olddoc_text_drunk': 'Текст: пьяный',
     'olddoc_flags_normal': 'Флаги: обычные',
     'olddoc_flags_drunk': 'Флаги: пьяные',
+    'olddoc_sub_on': 'Под веществами: вкл',
+    'olddoc_sub_off': 'Под веществами: выкл',
+    'olddoc_window_on': 'Окошко: вкл',
+    'olddoc_window_off': 'Окошко: выкл',
+    'olddoc_outline_on': 'Обводка: вкл',
+    'olddoc_outline_off': 'Обводка: выкл',
 }
 
 LOCALES = {"ru": RU}

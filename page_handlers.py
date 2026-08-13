@@ -665,6 +665,9 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
             paper=int(p.data.get("_old_paper", 0)) + 1,
             text="пьяный" if p.data.get("_old_drunk") else "обычный",
             flags="пьяные" if p.data.get("_old_drunk_flags") else "обычные",
+            sub="вкл" if p.data.get("_old_substances") else "выкл",
+            window="вкл" if p.data.get("_old_window", True) else "выкл",
+            outline="вкл" if p.data.get("_old_outline", True) else "выкл",
         ),
         reply_markup=olddoc_options_kb(
             page_id,
@@ -673,6 +676,9 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
             paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
             drunk=bool(p.data.get("_old_drunk", False)),
             drunk_flags=bool(p.data.get("_old_drunk_flags", False)),
+            substances=bool(p.data.get("_old_substances", False)),
+            window=bool(p.data.get("_old_window", True)),
+            outline=bool(p.data.get("_old_outline", True)),
         ),
     )
 
@@ -685,7 +691,7 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
         and d.split(":")[1].isdigit()
         and d.split(":")[2] in {
             "reseed", "cups", "cups_next", "cups_prev",
-            "paper", "paper_next", "paper_prev", "text", "flags",
+            "paper", "paper_next", "paper_prev", "text", "flags", "sub", "window", "outline",
         }
     )
 )
@@ -704,6 +710,9 @@ async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
         cycle_paper,
         toggle_drunk,
         toggle_drunk_flags,
+        toggle_substances,
+        toggle_window,
+        toggle_outline,
     )
     ensure_old_meta(p.data)
     if action == "reseed":
@@ -727,6 +736,15 @@ async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
     elif action == "flags":
         drunk = toggle_drunk_flags(p.data)
         msg = tr("olddoc_flags_drunk" if drunk else "olddoc_flags_normal")
+    elif action == "sub":
+        on = toggle_substances(p.data)
+        msg = tr("olddoc_sub_on" if on else "olddoc_sub_off")
+    elif action == "window":
+        on = toggle_window(p.data)
+        msg = tr("olddoc_window_on" if on else "olddoc_window_off")
+    elif action == "outline":
+        on = toggle_outline(p.data)
+        msg = tr("olddoc_outline_on" if on else "olddoc_outline_off")
     else:
         return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")

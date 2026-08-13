@@ -8,3 +8,4 @@ preview_*.png
 demo_*.png
 InfoBox_Bot*.zip
 *.log
+bot_runtime_state.json

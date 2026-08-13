@@ -1,0 +1,6 @@
+InfoBox Bot — admin + maintenance
+
+- Hidden admin commands (not in Telegram command menu)
+- /admin /maint /maint_on /maint_off for admin id 7787565361
+- Optional ADMIN_IDS in env
+- Maintenance mode blocks all non-admin users

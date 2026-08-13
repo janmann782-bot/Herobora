@@ -6,7 +6,7 @@ import math
 import random
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from media import image_caption, page_images
 from models import Page
@@ -59,6 +59,18 @@ def ensure_old_meta(data: dict) -> dict:
     if "_old_drunk_flags" not in data:
         data["_old_drunk_flags"] = False
     data["_old_drunk_flags"] = bool(data.get("_old_drunk_flags", False))
+    # "под веществами" — extreme mess
+    if "_old_substances" not in data:
+        data["_old_substances"] = False
+    data["_old_substances"] = bool(data.get("_old_substances", False))
+    # inner darkened content window
+    if "_old_window" not in data:
+        data["_old_window"] = True
+    data["_old_window"] = bool(data.get("_old_window", True))
+    # outer paper outline stroke
+    if "_old_outline" not in data:
+        data["_old_outline"] = True
+    data["_old_outline"] = bool(data.get("_old_outline", True))
     return data
 
 
@@ -97,6 +109,37 @@ def toggle_drunk_flags(data: dict) -> bool:
     ensure_old_meta(data)
     data["_old_drunk_flags"] = not bool(data["_old_drunk_flags"])
     return data["_old_drunk_flags"]
+
+
+def toggle_substances(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_substances"] = not bool(data["_old_substances"])
+    return data["_old_substances"]
+
+
+def toggle_window(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_window"] = not bool(data["_old_window"])
+    return data["_old_window"]
+
+
+def toggle_outline(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_outline"] = not bool(data["_old_outline"])
+    return data["_old_outline"]
+
+
+def _paper_outline(mask: Image.Image, width: int = 3, color=(42, 32, 22, 220)) -> Image.Image:
+    """Outer stroke along hard paper edge (follows torn mask)."""
+    # edge = dilated mask minus original
+    solid = mask.point(lambda v: 255 if v > 127 else 0)
+    dil = solid
+    for _ in range(max(1, width)):
+        dil = dil.filter(ImageFilter.MaxFilter(3))
+    edge = ImageChops.subtract(dil, solid)
+    stroke = Image.new("RGBA", mask.size, (0, 0, 0, 0))
+    stroke.paste(color, (0, 0), edge)
+    return stroke
 
 
 def _rng(seed: int) -> random.Random:
@@ -181,25 +224,35 @@ def _paper_bg(w: int, h: int, rng: random.Random, paper_index: int = 0) -> Image
     return img
 
 
-def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 14) -> Image.Image:
-    """Subtle irregular edge — not a video-mapping stamp."""
+def _soft_paper_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Image:
+    """Hard jagged torn edge — sharp, no soft soap."""
+    return _torn_mask(w, h, rng, depth=depth)
+
+
+def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Image:
+    """Hard irregular paper tear — crisp binary edge."""
     mask = Image.new("L", (w, h), 255)
     draw = ImageDraw.Draw(mask)
-    depth = max(6, min(depth, 16))
+    depth = max(12, min(depth, 32))
 
     def edge_points(length: int, axis: str, side: str) -> list[tuple[int, int]]:
         pts = []
-        step = max(4, length // 70)
-        n = max(10, length // step)
+        step = max(3, length // 95)
+        n = max(16, length // step)
         for i in range(n + 1):
             t = i / n
             pos = int(t * (length - 1))
-            # mostly shallow, rare deeper nick
-            if rng.random() < 0.12:
-                off = int(depth * rng.uniform(0.55, 1.0))
+            # frequent sharp nicks + occasional deep rip
+            if rng.random() < 0.18:
+                off = int(depth * rng.uniform(0.7, 1.25))
+            elif rng.random() < 0.35:
+                off = int(depth * rng.uniform(0.4, 0.75))
             else:
-                off = int(depth * rng.uniform(0.15, 0.45))
-            off = max(2, off)
+                off = int(depth * rng.uniform(0.12, 0.4))
+            off = max(3, min(depth + 8, off))
+            # micro zig-zag
+            if i > 0 and rng.random() < 0.4:
+                pos = max(0, min(length - 1, pos + rng.randint(-step // 2, step // 2)))
             if axis == "x":
                 y = off if side == "top" else h - 1 - off
                 pts.append((pos, y))
@@ -217,11 +270,8 @@ def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 14) -> Image.Ima
         pts = edge_points(w if axis == "x" else h, axis, side)
         draw.polygon([corner_a] + pts + [corner_b], fill=0)
 
-    # 1px soften so edge is not jaggy CRT, still hard
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=0.6))
-    mask = mask.point(lambda v: 255 if v > 160 else 0)
+    # NO blur — hard cut only
     return mask
-
 
 def _apply_stains(img: Image.Image, rng: random.Random, count: int = 1) -> Image.Image:
     """Place `count` cup stains of a fixed size (position/rotation still vary by seed)."""
@@ -327,6 +377,56 @@ def _media_path(value: object, root: Path) -> Path | None:
     return p
 
 
+def _draw_inner_window(base: Image.Image, margin: int, rng: random.Random) -> Image.Image:
+    """Darkened mat/window behind content area, soft edges."""
+    w, h = base.size
+    out = base.convert("RGBA")
+    # content rect slightly inside paper margin
+    pad = max(8, int(margin * 0.55))
+    x0, y0 = pad, pad
+    x1, y1 = w - pad, h - pad
+    if x1 - x0 < 40 or y1 - y0 < 40:
+        return out
+
+    # darken outside the inner window (mat)
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    # full dim
+    od.rectangle((0, 0, w, h), fill=(35, 28, 18, 55))
+    # cut hole with soft edge
+    hole = Image.new("L", (w, h), 0)
+    hd = ImageDraw.Draw(hole)
+    radius = max(6, margin // 3)
+    try:
+        hd.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill=255)
+    except Exception:
+        hd.rectangle((x0, y0, x1, y1), fill=255)
+    hole = hole.filter(ImageFilter.GaussianBlur(radius=max(2.5, margin * 0.12)))
+    # where hole is white → no overlay
+    inv = Image.eval(hole, lambda v: 255 - v)
+    dim = Image.new("RGBA", (w, h), (35, 28, 18, 55))
+    dim.putalpha(Image.eval(inv, lambda v: int(v * 0.55)))
+    out = Image.alpha_composite(out, dim)
+
+    # subtle inner panel lift (slightly lighter paper in window)
+    panel = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    lift = Image.new("RGBA", (w, h), (255, 248, 230, 28))
+    lift_mask = hole.point(lambda v: int(v * 0.9))
+    lift.putalpha(lift_mask)
+    out = Image.alpha_composite(out, lift)
+
+    # thin soft border line
+    border = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(border)
+    try:
+        bd.rounded_rectangle((x0, y0, x1, y1), radius=radius, outline=(60, 45, 30, 70), width=max(1, margin // 14))
+    except Exception:
+        bd.rectangle((x0, y0, x1, y1), outline=(60, 45, 30, 70), width=max(1, margin // 14))
+    border = border.filter(ImageFilter.GaussianBlur(radius=0.8))
+    out = Image.alpha_composite(out, border)
+    return out
+
+
 def render_olddoc(
     page: Page,
     work_dir: str | Path,
@@ -345,12 +445,16 @@ def render_olddoc(
     if not bool(data.get("_old_stains", True)):
         stain_count = 0
     paper_index = int(data.get("_old_paper", 0) or 0) % max(1, paper_count())
-    drunk = bool(data.get("_old_drunk", False))
-    drunk_flags = bool(data.get("_old_drunk_flags", False))
+    substances = bool(data.get("_old_substances", False))
+    drunk = bool(data.get("_old_drunk", False)) or substances
+    drunk_flags = bool(data.get("_old_drunk_flags", False)) or substances
+    show_window = bool(data.get("_old_window", True))
+    show_outline = bool(data.get("_old_outline", True))
     rng = _rng(seed)
 
     def draw_lines(draw, lines, xy, font, fill, line_h, width=None, align="left", max_jitter=1.6):
-        _draw_lines_messy(draw, lines, xy, font, fill, line_h, rng, width, align, max_jitter, drunk=drunk)
+        j = max_jitter * (2.4 if substances else 1.0)
+        _draw_lines_messy(draw, lines, xy, font, fill, line_h, rng, width, align, j, drunk=drunk)
 
     s = SCALE.get(quality, SCALE["high"])
     card_w = int(780 * s)
@@ -433,7 +537,7 @@ def render_olddoc(
                     else:
                         cx = pad + i * (cell_w + gap) + (cell_w - src.width) // 2
                     if drunk_flags:
-                        ang = rng.uniform(-3.5, 3.5)
+                        ang = rng.uniform(-8.0, 8.0) if substances else rng.uniform(-3.5, 3.5)
                         rgb = src.convert("RGB")
                         alpha = src.split()[3] if src.mode == "RGBA" else Image.new("L", src.size, 255)
                         rgb_r = rgb.rotate(ang, expand=True, resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0))
@@ -575,21 +679,28 @@ def render_olddoc(
 
     # stains under or over text? typically on paper, semi-over
     composed = Image.alpha_composite(bg.convert("RGBA"), canvas)
+    if show_window:
+        composed = _draw_inner_window(composed, margin, rng)
     if stain_count > 0:
         composed = _apply_stains(composed.convert("RGB"), rng, count=stain_count).convert("RGBA")
+    if substances:
+        wash = ImageEnhance.Color(composed.convert("RGB")).enhance(1.08)
+        wash = ImageEnhance.Contrast(wash).enhance(1.06)
+        composed = wash.convert("RGBA")
 
-    # torn edges + transparent outside the paper
-    depth = int(14 * s) + rng.randint(0, 8)
+    depth = int(22 * s) + rng.randint(4, 14)
     mask = _torn_mask(total_w, total_h, rng, depth=depth)
-
-    # keep stains/content RGB, then apply torn alpha so outside is fully transparent
     paper = composed.convert("RGBA")
-    paper.putalpha(mask)
+    r, g, b, a = paper.split()
+    a = Image.composite(a, Image.new("L", paper.size, 0), mask)
+    paper = Image.merge("RGBA", (r, g, b, a))
 
-    # small transparent padding around the sheet
-    pad_out = 8
+    pad_out = max(14, int(7 * s) + 6)
     final = Image.new("RGBA", (total_w + pad_out * 2, total_h + pad_out * 2), (0, 0, 0, 0))
+    if show_outline:
+        stroke_w = max(2, int(2.8 * s))
+        outline = _paper_outline(mask, width=stroke_w, color=(36, 26, 16, 235))
+        final.paste(outline, (pad_out, pad_out), outline)
     final.paste(paper, (pad_out, pad_out), paper)
-
     final.save(path, "PNG", compress_level=6, dpi=(144, 144))
     return path

@@ -865,6 +865,9 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
             paper=int(data.get("_old_paper", 0)) + 1,
             text="пьяный" if data.get("_old_drunk") else "обычный",
             flags="пьяные" if data.get("_old_drunk_flags") else "обычные",
+            sub="вкл" if data.get("_old_substances") else "выкл",
+            window="вкл" if data.get("_old_window", True) else "выкл",
+            outline="вкл" if data.get("_old_outline", True) else "выкл",
         ),
         reply_markup=olddoc_options_kb(
             None,
@@ -873,6 +876,9 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
             paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
             drunk=bool(data.get("_old_drunk", False)),
             drunk_flags=bool(data.get("_old_drunk_flags", False)),
+            substances=bool(data.get("_old_substances", False)),
+            window=bool(data.get("_old_window", True)),
+            outline=bool(data.get("_old_outline", True)),
         ),
     )
 
@@ -891,6 +897,9 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
         cycle_paper,
         toggle_drunk,
         toggle_drunk_flags,
+        toggle_substances,
+        toggle_window,
+        toggle_outline,
         paper_count,
     )
     ensure_old_meta(data)
@@ -915,6 +924,15 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
     elif action == "flags":
         drunk = toggle_drunk_flags(data)
         msg = tr("olddoc_flags_drunk" if drunk else "olddoc_flags_normal")
+    elif action == "sub":
+        on = toggle_substances(data)
+        msg = tr("olddoc_sub_on" if on else "olddoc_sub_off")
+    elif action == "window":
+        on = toggle_window(data)
+        msg = tr("olddoc_window_on" if on else "olddoc_window_off")
+    elif action == "outline":
+        on = toggle_outline(data)
+        msg = tr("olddoc_outline_on" if on else "olddoc_outline_off")
     else:
         return
     await state.update_data(page_data=data)
@@ -926,6 +944,7 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
     F.data.in_({
         "old:reseed", "old:cups", "old:cups_next", "old:cups_prev",
         "old:paper", "old:paper_next", "old:paper_prev", "old:text", "old:flags",
+        "old:sub", "old:window", "old:outline",
     })
 )
 async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
