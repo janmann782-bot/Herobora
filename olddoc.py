@@ -14,9 +14,9 @@ from templates import Field, Template, get_template
 from themes import Theme, get_theme
 
 HERE = Path(__file__).resolve().parent
-ASSETS = HERE / "assets"
-PAPERS = [ASSETS / "paper1.png", ASSETS / "paper2.png"]
-STAINS = [ASSETS / "stain1.png", ASSETS / "stain2.png"]
+# Textures live next to the bot sources (root folder), not in a subfolder.
+PAPERS = [HERE / "paper1.png", HERE / "paper2.png"]
+STAINS = [HERE / "stain1.png", HERE / "stain2.png"]
 
 SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
@@ -110,36 +110,56 @@ def _paper_bg(w: int, h: int, rng: random.Random) -> Image.Image:
     oy = rng.randint(0, max(0, nh - h))
     img = src.crop((ox, oy, ox + w, oy + h))
 
-    # brightness / contrast variation
-    bright = rng.uniform(0.88, 1.12)
-    contrast = rng.uniform(0.9, 1.15)
+    # brightness / contrast — keep texture readable
+    bright = rng.uniform(0.92, 1.08)
+    contrast = rng.uniform(1.05, 1.25)
     img = ImageEnhance.Brightness(img).enhance(bright)
     img = ImageEnhance.Contrast(img).enhance(contrast)
+    img = ImageEnhance.Color(img).enhance(rng.uniform(0.85, 1.05))
     # slight color shift toward sepia/yellow
-    if rng.random() < 0.7:
-        r, g, b = img.split()
-        r = r.point(lambda x: min(255, int(x * rng.uniform(1.0, 1.06))))
-        b = b.point(lambda x: max(0, int(x * rng.uniform(0.9, 0.98))))
-        img = Image.merge("RGB", (r, g, b))
+    r, g, b = img.split()
+    r = r.point(lambda x: min(255, int(x * rng.uniform(1.0, 1.05))))
+    b = b.point(lambda x: max(0, int(x * rng.uniform(0.88, 0.97))))
+    img = Image.merge("RGB", (r, g, b))
+    # fine grain so flat regions still look like paper (no numpy)
+    grain = Image.new("RGB", img.size)
+    px = grain.load()
+    w, h = img.size
+    for y in range(0, h, 2):
+        for x in range(0, w, 2):
+            v = rng.randint(-7, 8)
+            c = (128 + v, 128 + v, 128 + v)
+            px[x, y] = c
+            if x + 1 < w:
+                px[x + 1, y] = c
+            if y + 1 < h:
+                px[x, y + 1] = c
+                if x + 1 < w:
+                    px[x + 1, y + 1] = c
+    grain = grain.filter(ImageFilter.GaussianBlur(radius=0.6))
+    img = Image.blend(img, grain, 0.07)
     return img
 
 
 def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Image:
-    """Alpha mask: opaque center, irregular torn edges."""
+    """Hard irregular torn edge — no soapy soft feather."""
     mask = Image.new("L", (w, h), 255)
     draw = ImageDraw.Draw(mask)
-    depth = max(8, depth)
+    depth = max(10, depth)
 
     def edge_points(length: int, axis: str, side: str) -> list[tuple[int, int]]:
         pts = []
-        step = max(6, length // 40)
-        n = max(3, length // step)
+        # dense steps → fiber-like jags, not smooth waves
+        step = max(3, length // 90)
+        n = max(8, length // step)
+        base = depth * 0.45
         for i in range(n + 1):
             t = i / n
             pos = int(t * (length - 1))
-            jitter = int(rng.gauss(0, depth * 0.35))
-            jagged = int(depth * (0.4 + 0.6 * abs(math.sin(t * math.pi * rng.uniform(2, 5)))))
-            off = max(0, min(depth + 4, depth // 2 + jagged + jitter))
+            # occasional deeper rips
+            spike = depth * rng.uniform(0.2, 1.15) if rng.random() < 0.22 else depth * rng.uniform(0.05, 0.45)
+            jitter = rng.uniform(-depth * 0.25, depth * 0.25)
+            off = int(max(2, min(depth + 6, base + spike + jitter)))
             if axis == "x":
                 y = off if side == "top" else h - 1 - off
                 pts.append((pos, y))
@@ -148,25 +168,17 @@ def _torn_mask(w: int, h: int, rng: random.Random, depth: int = 18) -> Image.Ima
                 pts.append((x, pos))
         return pts
 
-    # top
-    top = edge_points(w, "x", "top")
-    poly = [(0, 0)] + top + [(w - 1, 0)]
-    draw.polygon(poly, fill=0)
-    # bottom
-    bot = edge_points(w, "x", "bottom")
-    poly = [(0, h - 1)] + bot + [(w - 1, h - 1)]
-    draw.polygon(poly, fill=0)
-    # left
-    left = edge_points(h, "y", "left")
-    poly = [(0, 0)] + left + [(0, h - 1)]
-    draw.polygon(poly, fill=0)
-    # right
-    right = edge_points(h, "y", "right")
-    poly = [(w - 1, 0)] + right + [(w - 1, h - 1)]
-    draw.polygon(poly, fill=0)
+    for axis, side, corner_a, corner_b in (
+        ("x", "top", (0, 0), (w - 1, 0)),
+        ("x", "bottom", (0, h - 1), (w - 1, h - 1)),
+        ("y", "left", (0, 0), (0, h - 1)),
+        ("y", "right", (w - 1, 0), (w - 1, h - 1)),
+    ):
+        pts = edge_points(w if axis == "x" else h, axis, side)
+        poly = [corner_a] + pts + [corner_b]
+        draw.polygon(poly, fill=0)
 
-    # soften
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(1, depth // 6)))
+    # crisp binary edge — no soft soap halo
     return mask
 
 
@@ -363,10 +375,19 @@ def render_olddoc(
                         cx = (card_w - src.width) // 2
                     else:
                         cx = pad + i * (cell_w + gap) + (cell_w - src.width) // 2
-                    # slight rotation for old look
-                    ang = rng.uniform(-2.5, 2.5)
-                    rotated = src.rotate(ang, expand=True, resample=Image.Resampling.BICUBIC)
-                    gal.paste(rotated, (cx + rng.randint(-3, 3), yy + rng.randint(-2, 2)), rotated)
+                    # slight tilt; alpha rotated NEAREST so no soapy white corners
+                    ang = rng.uniform(-2.8, 2.8)
+                    rgb = src.convert("RGB")
+                    alpha = src.split()[3] if src.mode == "RGBA" else Image.new("L", src.size, 255)
+                    rgb_r = rgb.rotate(ang, expand=True, resample=Image.Resampling.BICUBIC, fillcolor=(0, 0, 0))
+                    a_r = alpha.rotate(ang, expand=True, resample=Image.Resampling.NEAREST, fillcolor=0)
+                    # kill any residual semi-transparent fringe from RGB bleed
+                    a_r = a_r.point(lambda v: 255 if v > 200 else 0)
+                    rotated = rgb_r.convert("RGBA")
+                    rotated.putalpha(a_r)
+                    ox = cx + rng.randint(-3, 3) - (rotated.width - src.width) // 2
+                    oy = yy + rng.randint(-2, 2) - (rotated.height - src.height) // 2
+                    gal.paste(rotated, (ox, oy), rotated)
                     if cap:
                         lines = _wrap(tmp, cap, cap_font, cell_w - 8)
                         _draw_lines_messy(
@@ -494,22 +515,18 @@ def render_olddoc(
     if stains_on:
         composed = _apply_stains(composed.convert("RGB"), rng).convert("RGBA")
 
-    # torn edges
+    # torn edges + transparent outside the paper
     depth = int(14 * s) + rng.randint(0, 8)
     mask = _torn_mask(total_w, total_h, rng, depth=depth)
-    # drop shadow behind
-    final_rgb = Image.new("RGB", (total_w + 16, total_h + 16), (40, 36, 30))
-    shadow = Image.new("RGBA", (total_w + 16, total_h + 16), (0, 0, 0, 0))
-    sh_layer = Image.new("L", (total_w, total_h), 90)
-    sh_layer = Image.composite(sh_layer, Image.new("L", (total_w, total_h), 0), mask)
-    sh_layer = sh_layer.filter(ImageFilter.GaussianBlur(radius=6))
-    shadow.paste((0, 0, 0, 100), (10, 10), sh_layer)
-    final = Image.alpha_composite(final_rgb.convert("RGBA"), shadow)
 
-    paper = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
-    paper.paste(composed, (0, 0))
+    # keep stains/content RGB, then apply torn alpha so outside is fully transparent
+    paper = composed.convert("RGBA")
     paper.putalpha(mask)
-    final.paste(paper, (4, 4), paper)
 
-    final.convert("RGB").save(path, "PNG", compress_level=6, dpi=(144, 144))
+    # small transparent padding around the sheet
+    pad_out = 8
+    final = Image.new("RGBA", (total_w + pad_out * 2, total_h + pad_out * 2), (0, 0, 0, 0))
+    final.paste(paper, (pad_out, pad_out), paper)
+
+    final.save(path, "PNG", compress_level=6, dpi=(144, 144))
     return path
