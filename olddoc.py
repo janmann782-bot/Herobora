@@ -21,6 +21,7 @@ PAPERS = [
     HERE / "paper3.png",
     HERE / "paper4.png",
     HERE / "paper5.png",
+    HERE / "paper6.png",
 ]
 STAINS = [HERE / "stain1.png", HERE / "stain2.png"]
 
@@ -28,7 +29,7 @@ SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
 STAIN_COUNT_MAX = 5
-PAPER_COUNT = 5
+PAPER_COUNT = 6
 
 def paper_count() -> int:
     return max(1, sum(1 for p in PAPERS if p.is_file()))
@@ -71,6 +72,9 @@ def ensure_old_meta(data: dict) -> dict:
     if "_old_outline" not in data:
         data["_old_outline"] = True
     data["_old_outline"] = bool(data.get("_old_outline", True))
+    if "_old_bw" not in data:
+        data["_old_bw"] = False
+    data["_old_bw"] = bool(data.get("_old_bw", False))
     return data
 
 
@@ -127,6 +131,12 @@ def toggle_outline(data: dict) -> bool:
     ensure_old_meta(data)
     data["_old_outline"] = not bool(data["_old_outline"])
     return data["_old_outline"]
+
+
+def toggle_bw(data: dict) -> bool:
+    ensure_old_meta(data)
+    data["_old_bw"] = not bool(data["_old_bw"])
+    return data["_old_bw"]
 
 
 def _paper_outline(mask: Image.Image, width: int = 3, color=(42, 32, 22, 220)) -> Image.Image:
@@ -585,17 +595,6 @@ def render_olddoc(
     def section_title(text: str) -> Image.Image:
         lines = _wrap(tmp, text, sec_font, content_w)
         lh = _line_h(tmp, sec_font)
-        if show_window:
-            # light-theme style: full-width bar
-            pad_y = int(10 * s)
-            h = pad_y * 2 + lh * len(lines)
-            img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            # muted section strip (readable on paper)
-            d.rectangle((0, 0, card_w - 1, h - 1), fill=(55, 42, 28, 55))
-            d.rectangle((0, 0, card_w - 1, h - 1), outline=(40, 30, 20, 90), width=max(1, int(s)))
-            draw_lines(d, lines, (pad, pad_y), sec_font, ink, lh, content_w, "center", 1.2)
-            return img
         h = int(10 * s) + len(lines) * lh + int(8 * s)
         img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
@@ -612,32 +611,6 @@ def render_olddoc(
         return img
 
     def field_row(label: str, value: object) -> Image.Image:
-        label_w = int(card_w * 0.36)
-        if show_window:
-            lab_lines = _wrap(tmp, label, label_font, label_w - pad)
-            val_lines = _wrap(tmp, value, value_font, card_w - label_w - pad)
-            pad_y = int(11 * s)
-            h = max(len(lab_lines) * lh_l, len(val_lines) * lh_v) + pad_y * 2
-            img = Image.new("RGBA", (card_w, h), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            # left cell mild fill + divider like light theme
-            d.rectangle((0, 0, label_w, h), fill=(40, 30, 20, 28))
-            bw = max(1, int(s))
-            d.line((label_w, 0, label_w, h), fill=(35, 28, 18, 140), width=bw)
-            d.line((0, h - 1, card_w - 1, h - 1), fill=(35, 28, 18, 100), width=bw)
-            draw_lines(d, lab_lines, (pad // 2, pad_y), label_font, ink_sec, lh_l, label_w - pad, "left", 1.2)
-            draw_lines(
-                d,
-                val_lines,
-                (label_w + pad // 2, pad_y),
-                value_font,
-                ink,
-                lh_v,
-                card_w - label_w - pad,
-                "left",
-                1.3,
-            )
-            return img
         lab_lines = _wrap(tmp, label, label_font, int(content_w * 0.38))
         val_lines = _wrap(tmp, value, value_font, int(content_w * 0.55))
         h = max(len(lab_lines) * lh_l, len(val_lines) * lh_v) + int(12 * s)
@@ -762,5 +735,10 @@ def render_olddoc(
         outline = _paper_outline(mask, width=stroke_w, color=(36, 26, 16, 235))
         final.paste(outline, (pad_out, pad_out), outline)
     final.paste(paper, (pad_out, pad_out), paper)
+    if bool(data.get("_old_bw", False)):
+        # full B&W
+        r, g, b, a = final.split()
+        gray = Image.merge("RGB", (r, g, b)).convert("L")
+        final = Image.merge("RGBA", (gray, gray, gray, a))
     final.save(path, "PNG", compress_level=6, dpi=(144, 144))
     return path

@@ -648,6 +648,7 @@ async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
 
 
 
+
 @router.callback_query(F.data.startswith("p:old:"))
 async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
     await q.answer()
@@ -655,30 +656,32 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
     p = await get_owned(q, db, page_id)
     if not p:
         return
-    from olddoc import ensure_old_meta
+    from olddoc import ensure_old_meta, paper_count
     ensure_old_meta(p.data)
     await q.message.answer(
         tr(
-            "olddoc_options",
+            "olddoc_pick",
             seed=p.data.get("_old_seed", 0),
-            cups=p.data.get("_old_stain_count", 1),
             paper=int(p.data.get("_old_paper", 0)) + 1,
+            cups=p.data.get("_old_stain_count", 0),
             text="пьяный" if p.data.get("_old_drunk") else "обычный",
             flags="пьяные" if p.data.get("_old_drunk_flags") else "обычные",
             sub="вкл" if p.data.get("_old_substances") else "выкл",
             window="вкл" if p.data.get("_old_window", True) else "выкл",
             outline="вкл" if p.data.get("_old_outline", True) else "выкл",
+            bw="вкл" if p.data.get("_old_bw") else "выкл",
         ),
         reply_markup=olddoc_options_kb(
             page_id,
             stain_count=int(p.data.get("_old_stain_count", 0)),
             paper=int(p.data.get("_old_paper", 0)),
-            paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
+            paper_total=paper_count(),
             drunk=bool(p.data.get("_old_drunk", False)),
             drunk_flags=bool(p.data.get("_old_drunk_flags", False)),
             substances=bool(p.data.get("_old_substances", False)),
             window=bool(p.data.get("_old_window", True)),
             outline=bool(p.data.get("_old_outline", True)),
+            bw=bool(p.data.get("_old_bw", False)),
         ),
     )
 
@@ -691,7 +694,8 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
         and d.split(":")[1].isdigit()
         and d.split(":")[2] in {
             "reseed", "cups", "cups_next", "cups_prev",
-            "paper", "paper_next", "paper_prev", "text", "flags", "sub", "window", "outline",
+            "paper", "paper_next", "paper_prev", "text", "flags",
+            "sub", "window", "outline", "bw", "apply",
         }
     )
 )
@@ -713,43 +717,82 @@ async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
         toggle_substances,
         toggle_window,
         toggle_outline,
+        toggle_bw,
+        paper_count,
     )
     ensure_old_meta(p.data)
+
+    # pending stored on page data under _old_pending
+    pending = p.data.get("_old_pending")
+    if not isinstance(pending, dict) or action == "apply" and not pending:
+        pending = {
+            "_old_seed": p.data.get("_old_seed"),
+            "_old_stain_count": int(p.data.get("_old_stain_count", 0)),
+            "_old_paper": int(p.data.get("_old_paper", 0)),
+            "_old_drunk": bool(p.data.get("_old_drunk", False)),
+            "_old_drunk_flags": bool(p.data.get("_old_drunk_flags", False)),
+            "_old_substances": bool(p.data.get("_old_substances", False)),
+            "_old_window": bool(p.data.get("_old_window", True)),
+            "_old_outline": bool(p.data.get("_old_outline", True)),
+            "_old_bw": bool(p.data.get("_old_bw", False)),
+        }
+
+    if action == "apply":
+        for k, v in pending.items():
+            p.data[k] = v
+        p.data["_old_stains"] = int(p.data.get("_old_stain_count", 0) or 0) > 0
+        p.data.pop("_old_pending", None)
+        safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+        p.preview_path = None
+        await db.update_page(p)
+        await q.message.answer(tr("olddoc_applied"))
+        await render_saved(q.message, p, db, cfg)
+        return
+
+    tmp = dict(pending)
+    ensure_old_meta(tmp)
     if action == "reseed":
-        new_seed(p.data)
-        msg = tr("olddoc_reseeded")
+        new_seed(tmp)
+        pending["_old_seed"] = tmp["_old_seed"]
     elif action in {"cups", "cups_next"}:
-        n = cycle_stain_count_step(p.data, 1)
-        msg = tr("olddoc_cups", count=n)
+        pending["_old_stain_count"] = cycle_stain_count_step(tmp, 1)
     elif action == "cups_prev":
-        n = cycle_stain_count_step(p.data, -1)
-        msg = tr("olddoc_cups", count=n)
+        pending["_old_stain_count"] = cycle_stain_count_step(tmp, -1)
     elif action in {"paper", "paper_next"}:
-        n = cycle_paper(p.data, 1)
-        msg = tr("olddoc_paper", n=n + 1)
+        pending["_old_paper"] = cycle_paper(tmp, 1)
     elif action == "paper_prev":
-        n = cycle_paper(p.data, -1)
-        msg = tr("olddoc_paper", n=n + 1)
+        pending["_old_paper"] = cycle_paper(tmp, -1)
     elif action == "text":
-        drunk = toggle_drunk(p.data)
-        msg = tr("olddoc_text_drunk" if drunk else "olddoc_text_normal")
+        pending["_old_drunk"] = toggle_drunk(tmp)
     elif action == "flags":
-        drunk = toggle_drunk_flags(p.data)
-        msg = tr("olddoc_flags_drunk" if drunk else "olddoc_flags_normal")
+        pending["_old_drunk_flags"] = toggle_drunk_flags(tmp)
     elif action == "sub":
-        on = toggle_substances(p.data)
-        msg = tr("olddoc_sub_on" if on else "olddoc_sub_off")
+        pending["_old_substances"] = toggle_substances(tmp)
     elif action == "window":
-        on = toggle_window(p.data)
-        msg = tr("olddoc_window_on" if on else "olddoc_window_off")
+        pending["_old_window"] = toggle_window(tmp)
     elif action == "outline":
-        on = toggle_outline(p.data)
-        msg = tr("olddoc_outline_on" if on else "olddoc_outline_off")
+        pending["_old_outline"] = toggle_outline(tmp)
+    elif action == "bw":
+        pending["_old_bw"] = toggle_bw(tmp)
     else:
         return
-    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
-    p.preview_path = None
+
+    p.data["_old_pending"] = pending
     await db.update_page(p)
-    await q.message.answer(msg)
-    await render_saved(q.message, p, db, cfg)
+    kb = olddoc_options_kb(
+        page_id,
+        stain_count=int(pending.get("_old_stain_count", 0)),
+        paper=int(pending.get("_old_paper", 0)),
+        paper_total=paper_count(),
+        drunk=bool(pending.get("_old_drunk", False)),
+        drunk_flags=bool(pending.get("_old_drunk_flags", False)),
+        substances=bool(pending.get("_old_substances", False)),
+        window=bool(pending.get("_old_window", True)),
+        outline=bool(pending.get("_old_outline", True)),
+        bw=bool(pending.get("_old_bw", False)),
+    )
+    try:
+        await q.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
 

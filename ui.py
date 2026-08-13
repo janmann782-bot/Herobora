@@ -129,12 +129,13 @@ def olddoc_options_kb(
     *,
     stain_count: int = 0,
     paper: int = 0,
-    paper_total: int = 5,
+    paper_total: int = 6,
     drunk: bool = False,
     drunk_flags: bool = False,
     substances: bool = False,
     window: bool = True,
     outline: bool = True,
+    bw: bool = False,
 ) -> InlineKeyboardMarkup:
     paper_n = (paper % max(1, paper_total)) + 1
     text_label = f"🔤 Текст: {'пьяный' if drunk else 'обычный'}"
@@ -142,16 +143,19 @@ def olddoc_options_kb(
     sub_label = f"💊 Под веществами: {'вкл' if substances else 'выкл'}"
     win_label = f"🪟 Окошко: {'вкл' if window else 'выкл'}"
     out_label = f"✏️ Обводка: {'вкл' if outline else 'выкл'}"
+    bw_label = f"⬛ ЧБ: {'вкл' if bw else 'выкл'}"
     if page_id is None:
         pfx = "old"
         back = "draft:back"
         back_label = "⬅️ К предпросмотру"
+        apply = "old:apply"
     else:
         pfx = f"old:{page_id}"
         back = f"p:o:{page_id}"
         back_label = "⬅️ К странице"
+        apply = f"old:{page_id}:apply"
     rows = [
-        [ib("🔄 Новый вариант (сид)", f"{pfx}:reseed")],
+        [ib("🔄 Новый сид", f"{pfx}:reseed")],
         [
             ib("◀️", f"{pfx}:paper_prev"),
             ib(f"📄 Бумага: {paper_n}/{paper_total}", f"{pfx}:paper"),
@@ -162,11 +166,11 @@ def olddoc_options_kb(
             ib(f"☕️ Кружки: {stain_count}", f"{pfx}:cups"),
             ib("▶️", f"{pfx}:cups_next"),
         ],
-        [ib(text_label, f"{pfx}:text")],
-        [ib(flags_label, f"{pfx}:flags")],
+        [ib(text_label, f"{pfx}:text"), ib(flags_label, f"{pfx}:flags")],
         [ib(sub_label, f"{pfx}:sub")],
-        [ib(win_label, f"{pfx}:window")],
-        [ib(out_label, f"{pfx}:outline")],
+        [ib(win_label, f"{pfx}:window"), ib(out_label, f"{pfx}:outline")],
+        [ib(bw_label, f"{pfx}:bw")],
+        [ib("✅ Подтвердить изменения", apply)],
         [ib(back_label, back)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)

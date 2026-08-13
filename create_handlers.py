@@ -846,6 +846,7 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
 
 
 
+
 @router.callback_query(F.data == "draft:olddoc")
 async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
     await q.answer()
@@ -854,32 +855,81 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
         await q.message.answer(tr("draft_missing"))
         return
     data = d.get("page_data") or {}
-    from olddoc import ensure_old_meta
+    from olddoc import ensure_old_meta, paper_count
     ensure_old_meta(data)
-    await state.update_data(page_data=data)
+    pending = {
+        "_old_seed": data.get("_old_seed"),
+        "_old_stain_count": int(data.get("_old_stain_count", 0)),
+        "_old_paper": int(data.get("_old_paper", 0)),
+        "_old_drunk": bool(data.get("_old_drunk", False)),
+        "_old_drunk_flags": bool(data.get("_old_drunk_flags", False)),
+        "_old_substances": bool(data.get("_old_substances", False)),
+        "_old_window": bool(data.get("_old_window", True)),
+        "_old_outline": bool(data.get("_old_outline", True)),
+        "_old_bw": bool(data.get("_old_bw", False)),
+    }
+    await state.update_data(page_data=data, old_pending=pending)
     await q.message.answer(
         tr(
-            "olddoc_options",
-            seed=data.get("_old_seed", 0),
-            cups=data.get("_old_stain_count", 1),
-            paper=int(data.get("_old_paper", 0)) + 1,
-            text="пьяный" if data.get("_old_drunk") else "обычный",
-            flags="пьяные" if data.get("_old_drunk_flags") else "обычные",
-            sub="вкл" if data.get("_old_substances") else "выкл",
-            window="вкл" if data.get("_old_window", True) else "выкл",
-            outline="вкл" if data.get("_old_outline", True) else "выкл",
+            "olddoc_pick",
+            seed=pending.get("_old_seed", 0),
+            paper=int(pending.get("_old_paper", 0)) + 1,
+            cups=pending.get("_old_stain_count", 0),
+            text="пьяный" if pending.get("_old_drunk") else "обычный",
+            flags="пьяные" if pending.get("_old_drunk_flags") else "обычные",
+            sub="вкл" if pending.get("_old_substances") else "выкл",
+            window="вкл" if pending.get("_old_window", True) else "выкл",
+            outline="вкл" if pending.get("_old_outline", True) else "выкл",
+            bw="вкл" if pending.get("_old_bw") else "выкл",
         ),
         reply_markup=olddoc_options_kb(
             None,
-            stain_count=int(data.get("_old_stain_count", 0)),
-            paper=int(data.get("_old_paper", 0)),
-            paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
-            drunk=bool(data.get("_old_drunk", False)),
-            drunk_flags=bool(data.get("_old_drunk_flags", False)),
-            substances=bool(data.get("_old_substances", False)),
-            window=bool(data.get("_old_window", True)),
-            outline=bool(data.get("_old_outline", True)),
+            stain_count=int(pending.get("_old_stain_count", 0)),
+            paper=int(pending.get("_old_paper", 0)),
+            paper_total=paper_count(),
+            drunk=bool(pending.get("_old_drunk", False)),
+            drunk_flags=bool(pending.get("_old_drunk_flags", False)),
+            substances=bool(pending.get("_old_substances", False)),
+            window=bool(pending.get("_old_window", True)),
+            outline=bool(pending.get("_old_outline", True)),
+            bw=bool(pending.get("_old_bw", False)),
         ),
+    )
+
+
+def _pending_opts(d: dict) -> dict:
+    from olddoc import ensure_old_meta
+    data = dict(d.get("page_data") or {})
+    ensure_old_meta(data)
+    pending = d.get("old_pending")
+    if not isinstance(pending, dict):
+        pending = {
+            "_old_seed": data.get("_old_seed"),
+            "_old_stain_count": int(data.get("_old_stain_count", 0)),
+            "_old_paper": int(data.get("_old_paper", 0)),
+            "_old_drunk": bool(data.get("_old_drunk", False)),
+            "_old_drunk_flags": bool(data.get("_old_drunk_flags", False)),
+            "_old_substances": bool(data.get("_old_substances", False)),
+            "_old_window": bool(data.get("_old_window", True)),
+            "_old_outline": bool(data.get("_old_outline", True)),
+            "_old_bw": bool(data.get("_old_bw", False)),
+        }
+    return pending
+
+
+def _kb_from_pending(pending: dict):
+    from olddoc import paper_count
+    return olddoc_options_kb(
+        None,
+        stain_count=int(pending.get("_old_stain_count", 0)),
+        paper=int(pending.get("_old_paper", 0)),
+        paper_total=paper_count(),
+        drunk=bool(pending.get("_old_drunk", False)),
+        drunk_flags=bool(pending.get("_old_drunk_flags", False)),
+        substances=bool(pending.get("_old_substances", False)),
+        window=bool(pending.get("_old_window", True)),
+        outline=bool(pending.get("_old_outline", True)),
+        bw=bool(pending.get("_old_bw", False)),
     )
 
 
@@ -892,7 +942,6 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
     from olddoc import (
         ensure_old_meta,
         new_seed,
-        cycle_stain_count,
         cycle_stain_count_step,
         cycle_paper,
         toggle_drunk,
@@ -900,55 +949,66 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
         toggle_substances,
         toggle_window,
         toggle_outline,
-        paper_count,
+        toggle_bw,
     )
     ensure_old_meta(data)
+    pending = _pending_opts(d)
+
+    if action == "apply":
+        for k, v in pending.items():
+            data[k] = v
+        data["_old_stains"] = int(data.get("_old_stain_count", 0) or 0) > 0
+        await state.update_data(page_data=data, old_pending=pending)
+        await q.message.answer(tr("olddoc_applied"))
+        await show_preview(q.message, state, db, cfg, bot, q.from_user)
+        return
+
+    # mutate a temp dict that mirrors pending keys for cycle helpers
+    tmp = dict(pending)
+    ensure_old_meta(tmp)
     if action == "reseed":
-        new_seed(data)
-        msg = tr("olddoc_reseeded")
+        new_seed(tmp)
+        pending["_old_seed"] = tmp["_old_seed"]
     elif action in {"cups", "cups_next"}:
-        n = cycle_stain_count_step(data, 1)
-        msg = tr("olddoc_cups", count=n)
+        pending["_old_stain_count"] = cycle_stain_count_step(tmp, 1)
     elif action == "cups_prev":
-        n = cycle_stain_count_step(data, -1)
-        msg = tr("olddoc_cups", count=n)
+        pending["_old_stain_count"] = cycle_stain_count_step(tmp, -1)
     elif action in {"paper", "paper_next"}:
-        n = cycle_paper(data, 1)
-        msg = tr("olddoc_paper", n=n + 1)
+        pending["_old_paper"] = cycle_paper(tmp, 1)
     elif action == "paper_prev":
-        n = cycle_paper(data, -1)
-        msg = tr("olddoc_paper", n=n + 1)
+        pending["_old_paper"] = cycle_paper(tmp, -1)
     elif action == "text":
-        drunk = toggle_drunk(data)
-        msg = tr("olddoc_text_drunk" if drunk else "olddoc_text_normal")
+        pending["_old_drunk"] = toggle_drunk(tmp)
     elif action == "flags":
-        drunk = toggle_drunk_flags(data)
-        msg = tr("olddoc_flags_drunk" if drunk else "olddoc_flags_normal")
+        pending["_old_drunk_flags"] = toggle_drunk_flags(tmp)
     elif action == "sub":
-        on = toggle_substances(data)
-        msg = tr("olddoc_sub_on" if on else "olddoc_sub_off")
+        pending["_old_substances"] = toggle_substances(tmp)
     elif action == "window":
-        on = toggle_window(data)
-        msg = tr("olddoc_window_on" if on else "olddoc_window_off")
+        pending["_old_window"] = toggle_window(tmp)
     elif action == "outline":
-        on = toggle_outline(data)
-        msg = tr("olddoc_outline_on" if on else "olddoc_outline_off")
+        pending["_old_outline"] = toggle_outline(tmp)
+    elif action == "bw":
+        pending["_old_bw"] = toggle_bw(tmp)
     else:
         return
-    await state.update_data(page_data=data)
-    await q.message.answer(msg)
-    await show_preview(q.message, state, db, cfg, bot, q.from_user)
+
+    await state.update_data(old_pending=pending)
+    try:
+        await q.message.edit_reply_markup(reply_markup=_kb_from_pending(pending))
+    except Exception:
+        pass
+    await q.answer("ок")
 
 
 @router.callback_query(
     F.data.in_({
         "old:reseed", "old:cups", "old:cups_next", "old:cups_prev",
         "old:paper", "old:paper_next", "old:paper_prev", "old:text", "old:flags",
-        "old:sub", "old:window", "old:outline",
+        "old:sub", "old:window", "old:outline", "old:bw", "old:apply",
     })
 )
 async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
-    await q.answer()
     action = q.data.split(":", 1)[1]
+    if action != "apply":
+        await q.answer()
     await _draft_old_apply(q, state, db, cfg, bot, action)
-

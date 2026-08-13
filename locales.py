@@ -93,6 +93,22 @@ RU = {
     'olddoc_window_off': 'Окошко: выкл',
     'olddoc_outline_on': 'Обводка: вкл',
     'olddoc_outline_off': 'Обводка: выкл',
+    'olddoc_bw_on': 'ЧБ: вкл',
+    'olddoc_bw_off': 'ЧБ: выкл',
+    'olddoc_applied': 'Изменения применены',
+    'olddoc_pick': (
+        'Варианты старого документа\n'
+        'Сначала настрой кнопками, потом нажми «Подтвердить изменения»\n\n'
+        'Сид: {seed}\n'
+        'Бумага: {paper}\n'
+        'Кружки: {cups}\n'
+        'Текст: {text}\n'
+        'Флаги: {flags}\n'
+        'Под веществами: {sub}\n'
+        'Окошко: {window}\n'
+        'Обводка: {outline}\n'
+        'ЧБ: {bw}'
+    ),
 }
 
 LOCALES = {"ru": RU}
