@@ -36,10 +36,13 @@ from themes import get_theme
 from ui import (
     CREATE,
     HELP,
+    NEWS,
+    STATS,
     MY_PAGES,
     SETTINGS,
     THEMES_BTN,
     draft_kb,
+    olddoc_options_kb,
     edit_value_kb,
     fields_kb,
     image_caption_kb,
@@ -150,7 +153,7 @@ async def show_preview(
             msg,
             path,
             tr("draft_caption", title=p.title, theme=get_theme(p.theme).name),
-            draft_kb(p.type),
+            draft_kb(p.type, p.theme),
         )
 
         # В лог-группу отправляем именно в момент первого реального рендера
@@ -165,7 +168,7 @@ async def show_preview(
         return p
     except Exception as e:
         log.exception("draft render failed for user %s", user_id)
-        await msg.answer(tr("render_error", error=render_error_text(e)), reply_markup=draft_kb((d.get("type") or "")))
+        await msg.answer(tr("render_error", error=render_error_text(e)), reply_markup=draft_kb((d.get("type") or ""), d.get("theme", "")))
         return None
     finally:
         with suppress(TelegramBadRequest):
@@ -280,7 +283,7 @@ async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot:
         await show_preview(msg, state, db, cfg, bot, user)
         return
     await state.set_state(NewPage.theme)
-    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
+    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")), parse_mode="HTML")
 
 
 @router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
@@ -480,7 +483,12 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, 
             await show_preview(q.message, state, db, cfg, bot, q.from_user)
         return
 
-    if value not in {"light", "dark", "aurelia"}:
+    from themes import theme_allowed, THEMES
+    if value not in THEMES:
+        return
+    page_type = d.get("type") or ""
+    if not theme_allowed(value, page_type):
+        await q.message.answer("Тема «Старый документ» пока доступна только для стран")
         return
     await state.update_data(theme=value)
     await show_preview(q.message, state, db, cfg, bot, q.from_user)
@@ -493,7 +501,7 @@ async def choose_draft_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "draft:fields")
@@ -713,7 +721,7 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -
     for path in page_images(p.data):
         await db.attach_media(path, p.id, q.from_user.id)
     await state.clear()
-    await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id, p.type))
+    await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id, p.type, p.theme))
 
 
 @router.callback_query(F.data == "draft:text")
@@ -724,7 +732,7 @@ async def text_draft(q: CallbackQuery, state: FSMContext) -> None:
         await q.message.answer(tr("draft_missing"))
         return
     p = make_draft(d, q.from_user.id)
-    await send_page_text(q.message, p, draft_kb(p.type))
+    await send_page_text(q.message, p, draft_kb(p.type, p.theme))
 
 
 @router.callback_query(F.data == "draft:export")
@@ -791,13 +799,13 @@ async def quick_theme(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light")), parse_mode="HTML")
+    await q.message.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")), parse_mode="HTML")
 
 
 @router.message(StateFilter(None), F.text)
 async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     text = msg.text.strip()
-    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP}:
+    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP, NEWS, STATS}:
         return
     if text.startswith("/"):
         await msg.answer(tr("quick_hint"), reply_markup=main_menu())
@@ -835,3 +843,59 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
         generation_counted=False,
     )
     await show_quick(msg, state)
+
+
+@router.callback_query(F.data == "draft:olddoc")
+async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    data = d.get("page_data") or {}
+    from olddoc import ensure_old_meta
+    ensure_old_meta(data)
+    await state.update_data(page_data=data)
+    stains = bool(data.get("_old_stains", True))
+    await q.message.answer(
+        tr(
+            "olddoc_options",
+            seed=data.get("_old_seed", 0),
+            stains="вкл" if stains else "выкл",
+        ),
+        reply_markup=olddoc_options_kb(None, stains),
+    )
+
+
+@router.callback_query(F.data == "old:reseed")
+async def draft_old_reseed(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    data = d.get("page_data") or {}
+    from olddoc import ensure_old_meta, new_seed
+    ensure_old_meta(data)
+    new_seed(data)
+    await state.update_data(page_data=data)
+    await q.message.answer(tr("olddoc_reseeded"))
+    await show_preview(q.message, state, db, cfg, bot, q.from_user)
+
+
+@router.callback_query(F.data == "old:stains")
+async def draft_old_stains(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
+    await q.answer()
+    d = await state.get_data()
+    if not d.get("type"):
+        await q.message.answer(tr("draft_missing"))
+        return
+    data = d.get("page_data") or {}
+    from olddoc import ensure_old_meta
+    ensure_old_meta(data)
+    data["_old_stains"] = not bool(data.get("_old_stains", True))
+    await state.update_data(page_data=data)
+    on = data["_old_stains"]
+    await q.message.answer(tr("olddoc_stains_on" if on else "olddoc_stains_off"))
+    await show_preview(q.message, state, db, cfg, bot, q.from_user)
+

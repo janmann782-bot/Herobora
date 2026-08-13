@@ -39,6 +39,7 @@ from ui import (
     image_caption_kb,
     main_menu,
     page_actions_kb,
+    olddoc_options_kb,
     page_image_kb,
     pages_kb,
     progress_text,
@@ -97,7 +98,7 @@ async def render_saved(
                     await wait.delete()
 
     caption = tr("page_caption", title=p.title, theme=get_theme(p.theme).name)
-    await send_png(msg, path, caption, None if document else page_actions_kb(p.id, p.type), document)
+    await send_png(msg, path, caption, None if document else page_actions_kb(p.id, p.type, p.theme), document)
     return path
 
 
@@ -562,7 +563,7 @@ async def page_theme(q: CallbackQuery, db: Db) -> None:
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
-        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme), parse_mode="HTML")
+        await q.message.answer(tr("choose_theme"), reply_markup=themes_kb(f"pt:{page_id}", p.theme, p.type), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("pt:"))
@@ -578,6 +579,10 @@ async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
         return
     if theme not in THEMES:
         return
+    from themes import theme_allowed
+    if not theme_allowed(theme, p.type):
+        await q.message.answer("Тема «Старый документ» пока доступна только для стран")
+        return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")
     p.theme = theme
     p.preview_path = None
@@ -591,7 +596,7 @@ async def text_page(q: CallbackQuery, db: Db) -> None:
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
-        await send_page_text(q.message, p, page_actions_kb(p.id, p.type))
+        await send_page_text(q.message, p, page_actions_kb(p.id, p.type, p.theme))
 
 
 @router.callback_query(F.data.startswith("p:c:"))
@@ -604,7 +609,7 @@ async def copy_page(q: CallbackQuery, db: Db) -> None:
         return
     for path in page_images(p.data):
         await db.attach_media(path, p.id, q.from_user.id)
-    await q.message.answer(tr("copied", title=p.title), reply_markup=page_actions_kb(p.id, p.type))
+    await q.message.answer(tr("copied", title=p.title), reply_markup=page_actions_kb(p.id, p.type, p.theme))
 
 
 @router.callback_query(F.data.startswith("p:x:"))
@@ -640,3 +645,52 @@ async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
                 safe_unlink(path, cfg.work_dir, "media_")
         await state.clear()
         await q.message.answer(tr("deleted"), reply_markup=main_menu())
+
+
+@router.callback_query(F.data.startswith("p:old:"))
+async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
+    await q.answer()
+    page_id = int(q.data.rsplit(":", 1)[1])
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    from olddoc import ensure_old_meta
+    ensure_old_meta(p.data)
+    stains = bool(p.data.get("_old_stains", True))
+    await q.message.answer(
+        tr(
+            "olddoc_options",
+            seed=p.data.get("_old_seed", 0),
+            stains="вкл" if stains else "выкл",
+        ),
+        reply_markup=olddoc_options_kb(page_id, stains),
+    )
+
+
+@router.callback_query(
+    F.data.func(lambda d: isinstance(d, str) and d.startswith("old:") and d.count(":") == 2 and d.split(":")[1].isdigit())
+)
+async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
+    parts = (q.data or "").split(":")
+    await q.answer()
+    page_id = int(parts[1])
+    action = parts[2]
+    p = await get_owned(q, db, page_id)
+    if not p:
+        return
+    from olddoc import ensure_old_meta, new_seed
+    ensure_old_meta(p.data)
+    if action == "reseed":
+        new_seed(p.data)
+        msg = tr("olddoc_reseeded")
+    elif action == "stains":
+        p.data["_old_stains"] = not bool(p.data.get("_old_stains", True))
+        msg = tr("olddoc_stains_on" if p.data["_old_stains"] else "olddoc_stains_off")
+    else:
+        return
+    safe_unlink(p.preview_path, cfg.work_dir, "preview_")
+    p.preview_path = None
+    await db.update_page(p)
+    await q.message.answer(msg)
+    await render_saved(q.message, p, db, cfg)
+

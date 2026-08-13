@@ -26,6 +26,7 @@ THEMES_BTN = "🎨 Темы"
 SETTINGS = "⚙️ Настройки"
 HELP = "ℹ️ Помощь"
 STATS = "🥰Статистика"
+NEWS = "📰 Новость"
 T = TypeVar("T")
 
 
@@ -39,6 +40,7 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=CREATE), KeyboardButton(text=MY_PAGES)],
             [KeyboardButton(text=THEMES_BTN), KeyboardButton(text=SETTINGS)],
             [KeyboardButton(text=STATS), KeyboardButton(text=HELP)],
+            [KeyboardButton(text=NEWS)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Создать карточку или прислать данные текстом",
@@ -109,22 +111,45 @@ def image_caption_kb(page_id: int | None = None) -> InlineKeyboardMarkup:
     )
 
 
-def themes_kb(prefix: str, selected: str = "") -> InlineKeyboardMarkup:
+def themes_kb(prefix: str, selected: str = "", page_type: str = "") -> InlineKeyboardMarkup:
+    from themes import theme_allowed
+
     rows = []
     for x in THEMES.values():
+        if page_type and not theme_allowed(x.key, page_type):
+            continue
         mark = "▼ " if x.key == selected else ""
         rows.append([ib(f"{mark}{x.name}", f"{prefix}:{x.key}")])
     rows.append([ib("⬅️ Назад", f"{prefix}:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def draft_kb(page_type: str | None = None) -> InlineKeyboardMarkup:
+def olddoc_options_kb(page_id: int | None, stains: bool) -> InlineKeyboardMarkup:
+    stain_label = "☕️ Следы кружки: вкл" if stains else "☕️ Следы кружки: выкл"
+    if page_id is None:
+        rows = [
+            [ib("🔄 Новый вариант (сид)", "old:reseed")],
+            [ib(stain_label, "old:stains")],
+            [ib("⬅️ К предпросмотру", "draft:back")],
+        ]
+    else:
+        rows = [
+            [ib("🔄 Новый вариант (сид)", f"old:{page_id}:reseed")],
+            [ib(stain_label, f"old:{page_id}:stains")],
+            [ib("⬅️ К странице", f"p:o:{page_id}")],
+        ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMarkup:
     rows = [
         [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
         [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
     ]
     if page_type == "battle":
         rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
+    if theme == "olddoc" and page_type == "country":
+        rows.append([ib("📜 Варианты документа", "draft:olddoc")])
     rows += [
         [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
         [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
@@ -194,12 +219,14 @@ def edit_value_kb(back: str, cancel: str = "flow:cancel") -> InlineKeyboardMarku
     )
 
 
-def page_actions_kb(page_id: int, page_type: str | None = None) -> InlineKeyboardMarkup:
+def page_actions_kb(page_id: int, page_type: str | None = None, theme: str = "") -> InlineKeyboardMarkup:
     rows = [
         [ib("✏️ Изменить", f"p:e:{page_id}"), ib("🎨 Тема", f"p:t:{page_id}")],
     ]
     if page_type == "battle":
         rows.append([ib("⚔️ Редактор сторон", f"p:bs:{page_id}")])
+    if theme == "olddoc" and page_type == "country":
+        rows.append([ib("📜 Варианты документа", f"p:old:{page_id}")])
     rows += [
         [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📋 Выслать текстом", f"p:txt:{page_id}")],
         [ib("📄 Копия", f"p:c:{page_id}")],

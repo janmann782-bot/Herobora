@@ -19,6 +19,7 @@ from ui import (
     HELP,
     SETTINGS,
     STATS,
+    NEWS,
     THEMES_BTN,
     main_menu,
     quality_kb,
@@ -65,6 +66,11 @@ async def start(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
 @router.message(F.text == HELP)
 async def help_message(msg: Message) -> None:
     await msg.answer(tr("help"), reply_markup=main_menu(), parse_mode="HTML")
+
+
+@router.message(F.text == NEWS)
+async def news_message(msg: Message) -> None:
+    await msg.answer(tr("news_later"), reply_markup=main_menu())
 
 
 @router.message(Command("create"))

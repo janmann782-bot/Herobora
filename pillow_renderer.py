@@ -630,6 +630,11 @@ def render_pillow(
     output: str | Path,
     watermark: bool = True,
 ) -> Path:
+    if page.theme == "olddoc":
+        from olddoc import render_olddoc
+
+        return render_olddoc(page, work_dir, quality, output, watermark)
+
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
     theme = get_theme(page.theme)

@@ -109,7 +109,41 @@ AURELIA = Theme(
 )
 
 
-THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA)}
+OLDDOC = Theme(
+    key="olddoc",
+    name="Старый документ",
+    background="#3a342c",
+    panel="#e8dcc0",
+    panel_alt="#dfd0ae",
+    text="#2c2418",
+    text_secondary="#5a4e3a",
+    accent="#6b5a3e",
+    border="#8a7a5c",
+    section_bg="#d4c4a0",
+    section_text="#2c2418",
+    link="#4a3c28",
+    font="'Times New Roman', 'Liberation Serif', 'Wikipedia Serif', serif",
+    heading_font="'Times New Roman', 'Liberation Serif', 'Wikipedia Serif', serif",
+    border_width=1,
+    radius=0,
+    pixel_border=False,
+    image_border="#8a7a5c",
+)
+
+
+THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC)}
+
+# Theme available only for these page types (missing key = all types)
+THEME_PAGE_TYPES: dict[str, set[str] | None] = {
+    "olddoc": {"country"},
+}
+
+
+def theme_allowed(theme_key: str, page_type: str) -> bool:
+    allowed = THEME_PAGE_TYPES.get(theme_key)
+    if allowed is None:
+        return True
+    return page_type in allowed
 
 
 def get_theme(key: str) -> Theme:

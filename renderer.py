@@ -432,6 +432,12 @@ async def render_page(
 
     scale = QUALITY_SCALE.get(quality, QUALITY_SCALE["high"])
 
+    if page.theme == "olddoc":
+        from olddoc import render_olddoc
+
+        await asyncio.to_thread(render_olddoc, page, root, quality, path, watermark)
+        return path
+
     try:
         from playwright.async_api import async_playwright
 
