@@ -127,13 +127,12 @@ def themes_kb(prefix: str, selected: str = "", page_type: str = "") -> InlineKey
 def olddoc_options_kb(
     page_id: int | None,
     *,
-    stain_count: int = 1,
+    stain_count: int = 0,
     paper: int = 0,
+    paper_total: int = 5,
     drunk: bool = False,
 ) -> InlineKeyboardMarkup:
-    paper_names = ("1", "2")
-    paper_label = f"📄 Вид бумаги: {paper_names[paper % 2]}"
-    cups_label = f"☕️ Количество кружек (БЕТА): {stain_count}"
+    paper_n = (paper % max(1, paper_total)) + 1
     text_label = f"🔤 Текст: {'пьяный' if drunk else 'обычный'}"
     if page_id is None:
         pfx = "old"
@@ -145,8 +144,16 @@ def olddoc_options_kb(
         back_label = "⬅️ К странице"
     rows = [
         [ib("🔄 Новый вариант (сид)", f"{pfx}:reseed")],
-        [ib(cups_label, f"{pfx}:cups")],
-        [ib(paper_label, f"{pfx}:paper")],
+        [
+            ib("◀️", f"{pfx}:paper_prev"),
+            ib(f"📄 Бумага: {paper_n}/{paper_total}", f"{pfx}:paper"),
+            ib("▶️", f"{pfx}:paper_next"),
+        ],
+        [
+            ib("◀️", f"{pfx}:cups_prev"),
+            ib(f"☕️ Кружки: {stain_count}", f"{pfx}:cups"),
+            ib("▶️", f"{pfx}:cups_next"),
+        ],
         [ib(text_label, f"{pfx}:text")],
         [ib(back_label, back)],
     ]

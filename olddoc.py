@@ -15,14 +15,24 @@ from themes import Theme, get_theme
 
 HERE = Path(__file__).resolve().parent
 # Textures live next to the bot sources (root folder), not in a subfolder.
-PAPERS = [HERE / "paper1.png", HERE / "paper2.png"]
+PAPERS = [
+    HERE / "paper1.png",
+    HERE / "paper2.png",
+    HERE / "paper3.png",
+    HERE / "paper4.png",
+    HERE / "paper5.png",
+]
 STAINS = [HERE / "stain1.png", HERE / "stain2.png"]
 
 SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
 
 
 STAIN_COUNT_MAX = 5
-PAPER_COUNT = 2
+PAPER_COUNT = 5
+
+def paper_count() -> int:
+    return max(1, sum(1 for p in PAPERS if p.is_file()))
+
 
 
 def ensure_old_meta(data: dict) -> dict:
@@ -34,8 +44,9 @@ def ensure_old_meta(data: dict) -> dict:
         data["_old_stains"] = True
     # 0..STAIN_COUNT_MAX cups; if stains off, treated as 0 at render
     if "_old_stain_count" not in data:
-        data["_old_stain_count"] = 1
-    data["_old_stain_count"] = max(0, min(STAIN_COUNT_MAX, int(data.get("_old_stain_count", 1) or 0)))
+        data["_old_stain_count"] = 0
+    data["_old_stain_count"] = max(0, min(STAIN_COUNT_MAX, int(data.get("_old_stain_count", 0) or 0)))
+    data["_old_stains"] = data["_old_stain_count"] > 0
     # paper variant index 0..PAPER_COUNT-1
     if "_old_paper" not in data:
         data["_old_paper"] = 0
@@ -53,16 +64,23 @@ def new_seed(data: dict) -> int:
 
 
 def cycle_stain_count(data: dict) -> int:
+    return cycle_stain_count_step(data, 1)
+
+
+def cycle_paper(data: dict, step: int = 1) -> int:
     ensure_old_meta(data)
-    data["_old_stain_count"] = (int(data["_old_stain_count"]) + 1) % (STAIN_COUNT_MAX + 1)
+    n = max(1, paper_count())
+    data["_old_paper"] = (int(data["_old_paper"]) + step) % n
+    return data["_old_paper"]
+
+
+def cycle_stain_count_step(data: dict, step: int = 1) -> int:
+    ensure_old_meta(data)
+    mod = STAIN_COUNT_MAX + 1
+    data["_old_stain_count"] = (int(data["_old_stain_count"]) + step) % mod
     data["_old_stains"] = data["_old_stain_count"] > 0
     return data["_old_stain_count"]
 
-
-def cycle_paper(data: dict) -> int:
-    ensure_old_meta(data)
-    data["_old_paper"] = (int(data["_old_paper"]) + 1) % PAPER_COUNT
-    return data["_old_paper"]
 
 
 def toggle_drunk(data: dict) -> bool:
@@ -137,43 +155,38 @@ def _paper_bg(w: int, h: int, rng: random.Random, paper_index: int = 0) -> Image
 
     idx = paper_index % len(papers)
     src = Image.open(papers[idx]).convert("RGB")
-    # tile / cover
     sw, sh = src.size
-    scale = max(w / sw, h / sh) * (1.0 + rng.uniform(0.02, 0.12))
-    nw, nh = max(w, int(sw * scale)), max(h, int(sh * scale))
+    # cover canvas with slight random overscale / crop (natural frame)
+    scale = max(w / sw, h / sh) * (1.02 + rng.uniform(0.0, 0.08))
+    nw, nh = max(w + 2, int(sw * scale)), max(h + 2, int(sh * scale))
     src = src.resize((nw, nh), Image.Resampling.LANCZOS)
     ox = rng.randint(0, max(0, nw - w))
     oy = rng.randint(0, max(0, nh - h))
     img = src.crop((ox, oy, ox + w, oy + h))
 
-    # brightness / contrast — keep texture readable
-    bright = rng.uniform(0.92, 1.08)
-    contrast = rng.uniform(1.05, 1.25)
-    img = ImageEnhance.Brightness(img).enhance(bright)
-    img = ImageEnhance.Contrast(img).enhance(contrast)
-    img = ImageEnhance.Color(img).enhance(rng.uniform(0.85, 1.05))
-    # slight color shift toward sepia/yellow
+    # gentle tone — avoid plastic contrast
+    img = ImageEnhance.Brightness(img).enhance(rng.uniform(0.97, 1.04))
+    img = ImageEnhance.Contrast(img).enhance(rng.uniform(0.95, 1.08))
+    img = ImageEnhance.Color(img).enhance(rng.uniform(0.92, 1.05))
+    # warm paper bias
     r, g, b = img.split()
-    r = r.point(lambda x: min(255, int(x * rng.uniform(1.0, 1.05))))
-    b = b.point(lambda x: max(0, int(x * rng.uniform(0.88, 0.97))))
+    r = r.point(lambda x: min(255, int(x * rng.uniform(1.0, 1.03))))
+    b = b.point(lambda x: max(0, int(x * rng.uniform(0.94, 0.99))))
     img = Image.merge("RGB", (r, g, b))
-    # fine grain so flat regions still look like paper (no numpy)
-    grain = Image.new("RGB", img.size)
-    px = grain.load()
-    w, h = img.size
-    for y in range(0, h, 2):
-        for x in range(0, w, 2):
-            v = rng.randint(-7, 8)
-            c = (128 + v, 128 + v, 128 + v)
-            px[x, y] = c
-            if x + 1 < w:
-                px[x + 1, y] = c
-            if y + 1 < h:
-                px[x, y + 1] = c
-                if x + 1 < w:
-                    px[x + 1, y + 1] = c
-    grain = grain.filter(ImageFilter.GaussianBlur(radius=0.6))
-    img = Image.blend(img, grain, 0.07)
+
+    # soft vignette (edges slightly darker) for depth
+    vig = Image.new("L", (w, h), 0)
+    vd = ImageDraw.Draw(vig)
+    margin = max(8, min(w, h) // 12)
+    vd.ellipse((margin, margin, w - margin, h - margin), fill=255)
+    vig = vig.filter(ImageFilter.GaussianBlur(radius=max(12, min(w, h) // 8)))
+    dark = ImageEnhance.Brightness(img).enhance(0.88)
+    img = Image.composite(img, dark, vig)
+
+    # very light film grain
+    grain = Image.effect_noise((w, h), rng.uniform(6, 12)).convert("L")
+    grain = Image.merge("RGB", (grain, grain, grain))
+    img = Image.blend(img, grain, 0.04)
     return img
 
 

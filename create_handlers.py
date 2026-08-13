@@ -867,8 +867,9 @@ async def draft_olddoc_menu(q: CallbackQuery, state: FSMContext) -> None:
         ),
         reply_markup=olddoc_options_kb(
             None,
-            stain_count=int(data.get("_old_stain_count", 1)),
+            stain_count=int(data.get("_old_stain_count", 0)),
             paper=int(data.get("_old_paper", 0)),
+            paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
             drunk=bool(data.get("_old_drunk", False)),
         ),
     )
@@ -880,16 +881,30 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
         await q.message.answer(tr("draft_missing"))
         return
     data = d.get("page_data") or {}
-    from olddoc import ensure_old_meta, new_seed, cycle_stain_count, cycle_paper, toggle_drunk
+    from olddoc import (
+        ensure_old_meta,
+        new_seed,
+        cycle_stain_count,
+        cycle_stain_count_step,
+        cycle_paper,
+        toggle_drunk,
+        paper_count,
+    )
     ensure_old_meta(data)
     if action == "reseed":
         new_seed(data)
         msg = tr("olddoc_reseeded")
-    elif action == "cups":
-        n = cycle_stain_count(data)
+    elif action in {"cups", "cups_next"}:
+        n = cycle_stain_count_step(data, 1)
         msg = tr("olddoc_cups", count=n)
-    elif action == "paper":
-        n = cycle_paper(data)
+    elif action == "cups_prev":
+        n = cycle_stain_count_step(data, -1)
+        msg = tr("olddoc_cups", count=n)
+    elif action in {"paper", "paper_next"}:
+        n = cycle_paper(data, 1)
+        msg = tr("olddoc_paper", n=n + 1)
+    elif action == "paper_prev":
+        n = cycle_paper(data, -1)
         msg = tr("olddoc_paper", n=n + 1)
     elif action == "text":
         drunk = toggle_drunk(data)
@@ -901,7 +916,12 @@ async def _draft_old_apply(q: CallbackQuery, state: FSMContext, db: Db, cfg: Con
     await show_preview(q.message, state, db, cfg, bot, q.from_user)
 
 
-@router.callback_query(F.data.in_({"old:reseed", "old:cups", "old:paper", "old:text"}))
+@router.callback_query(
+    F.data.in_({
+        "old:reseed", "old:cups", "old:cups_next", "old:cups_prev",
+        "old:paper", "old:paper_next", "old:paper_prev", "old:text",
+    })
+)
 async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await q.answer()
     action = q.data.split(":", 1)[1]

@@ -667,8 +667,9 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
         ),
         reply_markup=olddoc_options_kb(
             page_id,
-            stain_count=int(p.data.get("_old_stain_count", 1)),
+            stain_count=int(p.data.get("_old_stain_count", 0)),
             paper=int(p.data.get("_old_paper", 0)),
+            paper_total=__import__("olddoc", fromlist=["paper_count"]).paper_count(),
             drunk=bool(p.data.get("_old_drunk", False)),
         ),
     )
@@ -680,7 +681,10 @@ async def page_olddoc_menu(q: CallbackQuery, db: Db) -> None:
         and d.startswith("old:")
         and d.count(":") == 2
         and d.split(":")[1].isdigit()
-        and d.split(":")[2] in {"reseed", "cups", "paper", "text"}
+        and d.split(":")[2] in {
+            "reseed", "cups", "cups_next", "cups_prev",
+            "paper", "paper_next", "paper_prev", "text",
+        }
     )
 )
 async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
@@ -691,16 +695,28 @@ async def page_old_actions(q: CallbackQuery, db: Db, cfg: Config) -> None:
     p = await get_owned(q, db, page_id)
     if not p:
         return
-    from olddoc import ensure_old_meta, new_seed, cycle_stain_count, cycle_paper, toggle_drunk
+    from olddoc import (
+        ensure_old_meta,
+        new_seed,
+        cycle_stain_count_step,
+        cycle_paper,
+        toggle_drunk,
+    )
     ensure_old_meta(p.data)
     if action == "reseed":
         new_seed(p.data)
         msg = tr("olddoc_reseeded")
-    elif action == "cups":
-        n = cycle_stain_count(p.data)
+    elif action in {"cups", "cups_next"}:
+        n = cycle_stain_count_step(p.data, 1)
         msg = tr("olddoc_cups", count=n)
-    elif action == "paper":
-        n = cycle_paper(p.data)
+    elif action == "cups_prev":
+        n = cycle_stain_count_step(p.data, -1)
+        msg = tr("olddoc_cups", count=n)
+    elif action in {"paper", "paper_next"}:
+        n = cycle_paper(p.data, 1)
+        msg = tr("olddoc_paper", n=n + 1)
+    elif action == "paper_prev":
+        n = cycle_paper(p.data, -1)
         msg = tr("olddoc_paper", n=n + 1)
     elif action == "text":
         drunk = toggle_drunk(p.data)
