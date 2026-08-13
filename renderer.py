@@ -112,7 +112,7 @@ def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | No
 
 
 def battle_side_cell(value: object, flags: list[tuple[str, str]]) -> str:
-    """Each text line is its own row with matching flag in front; text left-aligned."""
+    """Each text line is its own row. Flag i goes with line i. Text left-aligned."""
     if value in (None, '', []):
         parts = ["—"]
     elif isinstance(value, (list, tuple)):
@@ -120,32 +120,14 @@ def battle_side_cell(value: object, flags: list[tuple[str, str]]) -> str:
     else:
         parts = [ln.strip() for ln in str(value).splitlines() if ln.strip()] or ["—"]
 
-    by_name: dict[str, str] = {}
-    ordered: list[str] = []
-    for uri, cap in flags:
-        ordered.append(uri)
-        key = str(cap or "").strip().casefold()
-        if key and key not in by_name:
-            by_name[key] = uri
-
-    used_uris: set[str] = set()
-    # Prefer name match. For leftover flags, assign to trailing lines (side title stays without flag).
-    named_matches = {p.casefold() for p in parts if p.casefold() in by_name}
-    leftover_flags = [u for u in ordered if u not in {by_name[k] for k in named_matches}]
-    trailing_slots = [i for i, p in enumerate(parts) if p.casefold() not in named_matches]
-    # assign leftover flags to the last N trailing slots
-    assign_idx = {}
-    for slot, uri in zip(reversed(trailing_slots), reversed(leftover_flags)):
-        assign_idx[slot] = uri
+    uris = [uri for uri, _cap in flags if uri]
+    # more lines than flags → title without flag, flags on trailing member lines
+    offset = max(0, len(parts) - len(uris))
 
     rows_html = []
     for i, part in enumerate(parts):
-        key = part.casefold()
-        uri = by_name.get(key) if key in named_matches else assign_idx.get(i)
-        if uri is not None and uri in used_uris:
-            uri = None
-        if uri is not None:
-            used_uris.add(uri)
+        fi = i - offset
+        uri = uris[fi] if 0 <= fi < len(uris) else None
         flag_html = f'<img class="mini-flag" src="{uri}" alt="">' if uri else ""
         rows_html.append(
             f'<div class="side-row">{flag_html}<div class="battle-text">{value_html(part)}</div></div>'
