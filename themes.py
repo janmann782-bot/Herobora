@@ -131,11 +131,38 @@ OLDDOC = Theme(
 )
 
 
-THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC)}
+FIRE_RISES = Theme(
+    key="fire_rises",
+    name="THE FIRE RISES",
+    background="#000000",
+    panel="#f0eef5",
+    panel_alt="#e8e6ed",
+    text="#1a1a1a",
+    text_secondary="#4a4a4a",
+    accent="#7b5ea7",
+    border="#6b4f8a",
+    section_bg="#2d1f3d",
+    section_text="#e8e0f0",
+    link="#7b5ea7",
+    font="'Pixeloid Sans', monospace",
+    heading_font="'Pixeloid Sans', monospace",
+    border_width=1,
+    radius=0,
+    pixel_border=False,
+    image_border="#6b6b6b",
+)
+
+
+THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC, FIRE_RISES)}
 
 # Theme available only for these page types (missing key = all types)
 THEME_PAGE_TYPES: dict[str, set[str] | None] = {
     "olddoc": {"country"},
+    "fire_rises": {"news"},
+    # ordinary themes not for news — news only has TFR for now
+    "light": {"country", "region", "battle", "person"},
+    "dark": {"country", "region", "battle", "person"},
+    "aurelia": {"country", "region", "battle", "person"},
 }
 
 

@@ -205,11 +205,12 @@ async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
 
     s = await db.get_settings(q.from_user.id)
     await clear_flow(state, q.from_user.id, db, cfg)
+    theme = "fire_rises" if kind == "news" else s.theme
     await state.update_data(
         type=kind,
         page_data={},
         i=0,
-        theme=s.theme,
+        theme=theme,
         preview_path=None,
         max_image_mb=cfg.max_image_mb,
         creation_log_sent=False,

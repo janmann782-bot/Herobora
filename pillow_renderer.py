@@ -422,30 +422,48 @@ def _battle_side_cells(w: int, s: float, left: object, right: object, theme: The
     bw = max(1, int(theme.border_width * s))
     draw.line((col_w, 0, col_w, h), fill=theme.border, width=bw)
 
-    def draw_side(x0: int, rows) -> None:
+    def draw_side(x0: int, rows, mirror: bool = False) -> None:
         y = pad_y
         for thumb, lines in rows:
             th = thumb.height if thumb is not None else 0
             text_h = len(lines) * lh if lines else 0
             row_h = max(th, text_h, lh)
-            x = x0 + pad_x
-            if thumb is not None:
-                fy = y + max(0, (row_h - thumb.height) // 2)
-                img.paste(thumb, (x, fy))
-                draw.rectangle(
-                    (x, fy, x + thumb.width - 1, fy + thumb.height - 1),
-                    outline=theme.image_border,
-                    width=1,
-                )
-                x += thumb.width + gap
-            if lines:
-                ty = y + max(0, (row_h - len(lines) * lh) // 2)
-                text_w = col_w - (x - x0) - pad_x
-                _draw_lines(draw, lines, (x, ty), font, theme.text, lh, max(20, text_w), "left")
+            if mirror:
+                # text left, flag on the right of the row; whole row right-aligned in column
+                x_right = x0 + col_w - pad_x
+                if thumb is not None:
+                    fx = x_right - thumb.width
+                    fy = y + max(0, (row_h - thumb.height) // 2)
+                    img.paste(thumb, (fx, fy))
+                    draw.rectangle(
+                        (fx, fy, fx + thumb.width - 1, fy + thumb.height - 1),
+                        outline=theme.image_border,
+                        width=1,
+                    )
+                    x_right = fx - gap
+                if lines:
+                    ty = y + max(0, (row_h - len(lines) * lh) // 2)
+                    text_w = x_right - (x0 + pad_x)
+                    _draw_lines(draw, lines, (x0 + pad_x, ty), font, theme.text, lh, max(20, text_w), "right")
+            else:
+                x = x0 + pad_x
+                if thumb is not None:
+                    fy = y + max(0, (row_h - thumb.height) // 2)
+                    img.paste(thumb, (x, fy))
+                    draw.rectangle(
+                        (x, fy, x + thumb.width - 1, fy + thumb.height - 1),
+                        outline=theme.image_border,
+                        width=1,
+                    )
+                    x += thumb.width + gap
+                if lines:
+                    ty = y + max(0, (row_h - len(lines) * lh) // 2)
+                    text_w = col_w - (x - x0) - pad_x
+                    _draw_lines(draw, lines, (x, ty), font, theme.text, lh, max(20, text_w), "left")
             y += row_h + row_gap
 
-    draw_side(0, l_rows)
-    draw_side(col_w, r_rows)
+    draw_side(0, l_rows, mirror=False)
+    draw_side(col_w, r_rows, mirror=True)
     return img
 
 
@@ -637,6 +655,186 @@ def _standard_groups(tpl: Template, data: dict):
             yield name, fields
 
 
+def _render_news_tfr(
+    page: Page,
+    work_dir: Path,
+    output: Path,
+) -> Path:
+    """News card in THE FIRE RISES browser-frame style."""
+    here = Path(__file__).resolve().parent
+    frame_path = here / "tfr_frame.png"
+    if not frame_path.exists():
+        raise FileNotFoundError("не нашёл tfr_frame.png рядом с ботом")
+
+    frame = Image.open(frame_path).convert("RGBA")
+    fw, fh = frame.size
+
+    # coordinates measured on the 1536x2048 template
+    IMG_BOX = (362, 599, 1159, 898)  # x0,y0,x1,y1 transparent hole
+    BTN_BOX = (425, 1602, 1118, 1685)
+    TITLE_AREA = (420, 580)  # y range for title between chrome and image
+    BODY_TOP = 930
+    BODY_BOTTOM = 1560
+    CONTENT_X0 = 280
+    CONTENT_X1 = 1256
+
+    d = page.data
+    title = str(d.get("title") or page.title or "Без названия").strip()
+    body = str(d.get("body") or d.get("description") or "").strip()
+    button = str(d.get("button_text") or "").strip()
+    url = str(d.get("url") or "").strip()
+    tab = str(d.get("tab_title") or "").strip()
+
+    # base on black so transparent hole shows black until we paste image
+    canvas = Image.new("RGBA", (fw, fh), (0, 0, 0, 255))
+
+    # paste user image into the hole
+    images = page_images(d)
+    if images:
+        media = _media_path(images[0], work_dir)
+        if media is None:
+            # allow absolute existing path (e.g. during tests / external media)
+            cand = Path(str(images[0]))
+            if cand.is_file():
+                media = cand
+        if media is not None:
+            try:
+                src = ImageOps.exif_transpose(Image.open(media))
+                src.load()
+                src = src.convert("RGB")
+                box_w = IMG_BOX[2] - IMG_BOX[0]
+                box_h = IMG_BOX[3] - IMG_BOX[1]
+                fitted = ImageOps.fit(src, (box_w, box_h), Image.Resampling.LANCZOS)
+                canvas.paste(fitted, (IMG_BOX[0], IMG_BOX[1]))
+            except Exception:
+                pass
+
+    # overlay the frame (image shows through the hole)
+    canvas = Image.alpha_composite(canvas, frame)
+    draw = ImageDraw.Draw(canvas)
+
+    def load_font(name: str, size: int):
+        p = here / name
+        try:
+            return ImageFont.truetype(str(p), size)
+        except Exception:
+            return ImageFont.load_default()
+
+    title_font = load_font("ETORO-VF-V0.8.TTF", 54)
+    # fallback if variable font fails at size
+    try:
+        title_font.getbbox("A")
+    except Exception:
+        title_font = load_font("PixeloidSans-Bold.otf", 42)
+
+    body_font = load_font("PixeloidSans.otf", 28)
+    btn_font = load_font("PixeloidSans.otf", 26)
+    url_font = load_font("PixeloidSans.otf", 20)
+    tab_font = load_font("PixeloidSans.otf", 18)
+
+    # optional URL override in the address bar area (y ~ 340-380)
+    if url:
+        # cover original URL text region roughly and redraw
+        url_y = 355
+        # soft purple bar already has URL; draw over center
+        tw = draw.textlength(url, font=url_font) if hasattr(draw, "textlength") else len(url) * 10
+        ux = max(180, (fw - int(tw)) // 2)
+        # darken a strip then write
+        draw.rectangle((200, 340, 1340, 390), fill=(90, 55, 120, 220))
+        draw.text((ux, url_y), url, font=url_font, fill=(230, 220, 240, 255))
+
+    if tab:
+        # first tab label area ~ x 180-400, y 300
+        draw.text((190, 295), tab[:22], font=tab_font, fill=(240, 235, 250, 255))
+
+    # title centered between chrome and image
+    max_title_w = CONTENT_X1 - CONTENT_X0
+    words = title.split()
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        try:
+            tw = draw.textlength(test, font=title_font)
+        except Exception:
+            tw = len(test) * 28
+        if tw <= max_title_w or not cur:
+            cur = test
+        else:
+            lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    lines = lines[:3] or ["Без названия"]
+    try:
+        line_h = title_font.getbbox("Ag")[3] - title_font.getbbox("Ag")[1] + 8
+    except Exception:
+        line_h = 58
+    total_h = line_h * len(lines)
+    ty = TITLE_AREA[0] + max(0, (TITLE_AREA[1] - TITLE_AREA[0] - total_h) // 2)
+    for line in lines:
+        try:
+            tw = draw.textlength(line, font=title_font)
+        except Exception:
+            tw = len(line) * 28
+        tx = (fw - int(tw)) // 2
+        draw.text((tx, ty), line, font=title_font, fill=(20, 20, 20, 255))
+        ty += line_h
+
+    # body text
+    if body:
+        max_body_w = CONTENT_X1 - CONTENT_X0
+        body_lines: list[str] = []
+        for para in body.splitlines() or [body]:
+            para = para.strip()
+            if not para:
+                body_lines.append("")
+                continue
+            words = para.split()
+            cur = ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                try:
+                    tw = draw.textlength(test, font=body_font)
+                except Exception:
+                    tw = len(test) * 14
+                if tw <= max_body_w or not cur:
+                    cur = test
+                else:
+                    body_lines.append(cur)
+                    cur = w
+            if cur:
+                body_lines.append(cur)
+        try:
+            blh = body_font.getbbox("Ag")[3] - body_font.getbbox("Ag")[1] + 10
+        except Exception:
+            blh = 34
+        max_rows = max(1, (BODY_BOTTOM - BODY_TOP) // blh)
+        body_lines = body_lines[:max_rows]
+        by = BODY_TOP
+        for line in body_lines:
+            draw.text((CONTENT_X0, by), line, font=body_font, fill=(25, 25, 25, 255))
+            by += blh
+
+    # button text centered on the button
+    if button:
+        bx0, by0, bx1, by1 = BTN_BOX
+        try:
+            tw = draw.textlength(button, font=btn_font)
+            th = btn_font.getbbox("Ag")[3] - btn_font.getbbox("Ag")[1]
+        except Exception:
+            tw, th = len(button) * 12, 24
+        btx = bx0 + (bx1 - bx0 - int(tw)) // 2
+        bty = by0 + (by1 - by0 - int(th)) // 2 - 2
+        # slight glow / shadow
+        draw.text((btx + 1, bty + 1), button, font=btn_font, fill=(0, 0, 0, 180))
+        draw.text((btx, bty), button, font=btn_font, fill=(210, 230, 200, 255))
+
+    out = canvas.convert("RGB")
+    out.save(output, "PNG", compress_level=6)
+    return output
+
+
 def render_pillow(
     page: Page,
     work_dir: str | Path,
@@ -651,6 +849,10 @@ def render_pillow(
 
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
+
+    if page.type == "news":
+        return _render_news_tfr(page, root, path)
+
     theme = get_theme(page.theme)
     tpl = get_template(page.type)
     d = page.data

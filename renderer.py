@@ -111,8 +111,8 @@ def battle_media(data: dict, work_dir: str | Path) -> tuple[tuple[str, str] | No
     return main, to_uri_list(side1_items), to_uri_list(side2_items), extras
 
 
-def battle_side_cell(value: object, flags: list[tuple[str, str]]) -> str:
-    """Each text line is its own row. Flag i goes with line i. Text left-aligned."""
+def battle_side_cell(value: object, flags: list[tuple[str, str]], mirror: bool = False) -> str:
+    """Each text line is its own row. Flag on left (side1) or right (side2/mirror)."""
     if value in (None, '', []):
         parts = ["—"]
     elif isinstance(value, (list, tuple)):
@@ -124,19 +124,20 @@ def battle_side_cell(value: object, flags: list[tuple[str, str]]) -> str:
     # more lines than flags → title without flag, flags on trailing member lines
     offset = max(0, len(parts) - len(uris))
 
+    row_cls = "side-row side-row-mirror" if mirror else "side-row"
     rows_html = []
     for i, part in enumerate(parts):
         fi = i - offset
         uri = uris[fi] if 0 <= fi < len(uris) else None
         flag_html = f'<img class="mini-flag" src="{uri}" alt="">' if uri else ""
-        rows_html.append(
-            f'<div class="side-row">{flag_html}<div class="battle-text">{value_html(part)}</div></div>'
-        )
-    return (
-        '<div class="battle-cell battle-side-name">'
-        + "".join(rows_html)
-        + "</div>"
-    )
+        text_html = f'<div class="battle-text">{value_html(part)}</div>'
+        if mirror:
+            # text then flag (flag on the right)
+            rows_html.append(f'<div class="{row_cls}">{text_html}{flag_html}</div>')
+        else:
+            rows_html.append(f'<div class="{row_cls}">{flag_html}{text_html}</div>')
+    cell_cls = "battle-cell battle-side-name battle-side-mirror" if mirror else "battle-cell battle-side-name"
+    return f'<div class="{cell_cls}">' + "".join(rows_html) + "</div>"
 
 
 def battle_text_cell(value: object) -> str:
@@ -151,8 +152,8 @@ def battle_side_section(title: str, left: object, right: object, flags1: list[tu
     return (
         f'<section><h2>{esc(title)}</h2>'
         '<div class="battle-table">'
-        f'{battle_side_cell(left, flags1)}'
-        f'{battle_side_cell(right, flags2)}'
+        f'{battle_side_cell(left, flags1, mirror=False)}'
+        f'{battle_side_cell(right, flags2, mirror=True)}'
         '</div></section>'
     )
 
@@ -408,10 +409,17 @@ section h2 {{
   display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
   gap: 8px; text-align: left; font-weight: 700; font-size: 20px; min-height: 0;
 }}
+.battle-side-mirror {{
+  align-items: stretch; text-align: right;
+}}
 .side-row {{
   display: flex; flex-direction: row; align-items: center; gap: 10px;
   text-align: left; justify-content: flex-start;
 }}
+.side-row-mirror {{
+  justify-content: flex-end; text-align: right;
+}}
+.side-row-mirror .battle-text {{ text-align: right; }}
 .mini-flag {{ width: 34px; height: 22px; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--image-border); background: var(--panel-alt); }}
 .battle-text {{ min-width: 0; text-align: left; }}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
@@ -452,6 +460,12 @@ async def render_page(
         from olddoc import render_olddoc
 
         await asyncio.to_thread(render_olddoc, page, root, quality, path, watermark)
+        return path
+
+    if page.type == "news":
+        from pillow_renderer import render_pillow
+
+        await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
         return path
 
     try:
