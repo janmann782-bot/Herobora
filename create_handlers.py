@@ -515,7 +515,7 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, 
         return
     page_type = d.get("type") or ""
     if not theme_allowed(value, page_type):
-        await q.message.answer("Тема «Старый документ» пока доступна только для стран")
+        await q.message.answer("Тема Старый документ пока доступна только для стран")
         return
     await state.update_data(theme=value)
     await show_preview(q.message, state, db, cfg, bot, q.from_user)

@@ -600,7 +600,7 @@ async def set_page_theme(q: CallbackQuery, db: Db, cfg: Config) -> None:
         return
     from themes import theme_allowed
     if not theme_allowed(theme, p.type):
-        await q.message.answer("Тема «Старый документ» пока доступна только для стран")
+        await q.message.answer("Тема Старый документ пока доступна только для стран")
         return
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")
     p.theme = theme
