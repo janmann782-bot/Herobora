@@ -541,7 +541,7 @@ async def draft_fields(q: CallbackQuery, state: FSMContext) -> None:
     await q.message.answer(
         tr("fields_title"),
         reply_markup=fields_kb(get_template(d["type"]), d.get("page_data") or {}),
-        parse_mode="HTML",
+        parse_mode="Markdown",
     )
 
 
@@ -830,7 +830,7 @@ async def quick_fields(q: CallbackQuery, state: FSMContext) -> None:
     await q.message.answer(
         tr("fields_title"),
         reply_markup=fields_kb(get_template(d["type"]), d.get("page_data") or {}),
-        parse_mode="HTML",
+        parse_mode="Markdown",
     )
 
 

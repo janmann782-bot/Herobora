@@ -154,7 +154,7 @@ async def edit_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
     await q.message.answer(
         tr("fields_title"),
         reply_markup=fields_kb(get_template(p.type), p.data, p.id),
-        parse_mode="HTML",
+        parse_mode="Markdown",
     )
 
 
