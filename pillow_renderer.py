@@ -682,8 +682,6 @@ def _render_news_tfr(
     title = str(d.get("title") or page.title or "Без названия").strip()
     body = str(d.get("body") or d.get("description") or "").strip()
     button = str(d.get("button_text") or "").strip()
-    url = str(d.get("url") or "").strip()
-    tab = str(d.get("tab_title") or "").strip()
 
     # base on black so transparent hole shows black until we paste image
     canvas = Image.new("RGBA", (fw, fh), (0, 0, 0, 255))
@@ -729,23 +727,6 @@ def _render_news_tfr(
 
     body_font = load_font("PixeloidSans.otf", 28)
     btn_font = load_font("PixeloidSans.otf", 26)
-    url_font = load_font("PixeloidSans.otf", 20)
-    tab_font = load_font("PixeloidSans.otf", 18)
-
-    # optional URL override in the address bar area (y ~ 340-380)
-    if url:
-        # cover original URL text region roughly and redraw
-        url_y = 355
-        # soft purple bar already has URL; draw over center
-        tw = draw.textlength(url, font=url_font) if hasattr(draw, "textlength") else len(url) * 10
-        ux = max(180, (fw - int(tw)) // 2)
-        # darken a strip then write
-        draw.rectangle((200, 340, 1340, 390), fill=(90, 55, 120, 220))
-        draw.text((ux, url_y), url, font=url_font, fill=(230, 220, 240, 255))
-
-    if tab:
-        # first tab label area ~ x 180-400, y 300
-        draw.text((190, 295), tab[:22], font=tab_font, fill=(240, 235, 250, 255))
 
     # title centered between chrome and image
     max_title_w = CONTENT_X1 - CONTENT_X0

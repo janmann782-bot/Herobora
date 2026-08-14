@@ -305,16 +305,22 @@ async def page_add(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> 
         await state.set_state(EditPage.image)
         tpl = get_template(p.type)
         count = len(page_images(p.data))
-        await q.message.answer(
-            tr(
+        max_c = 1 if p.type == "news" else MAX_PAGE_IMAGES
+        if p.type == "news":
+            text = (
+                f"Кинь одну картинку к новости\n"
+                f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n\n"
+                f"Сейчас: {count}/{max_c}"
+            )
+        else:
+            text = tr(
                 "send_image",
                 label=tpl.image_label.lower(),
                 max_mb=cfg.max_image_mb,
                 count=count,
-                max_count=MAX_PAGE_IMAGES,
-            ),
-            reply_markup=page_image_kb(page_id, count),
-        )
+                max_count=max_c,
+            )
+        await q.message.answer(text, reply_markup=page_image_kb(page_id, count, p.type))
 
 
 @router.message(EditPage.custom_name)
@@ -380,22 +386,23 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         await msg.answer(tr("page_not_found"))
         return
     images = page_images(p.data)
-    if len(images) >= MAX_PAGE_IMAGES:
+    max_c = 1 if p.type == "news" else MAX_PAGE_IMAGES
+    if len(images) >= max_c and p.type != "news":
         await msg.answer(
-            tr("image_limit", max_count=MAX_PAGE_IMAGES),
-            reply_markup=page_image_kb(p.id, len(images)),
+            tr("image_limit", max_count=max_c),
+            reply_markup=page_image_kb(p.id, len(images), p.type),
         )
         return
 
     f = msg.photo[-1] if msg.photo else msg.document
     if not f:
-        await msg.answer(tr("image_only"), reply_markup=page_image_kb(p.id, len(images)))
+        await msg.answer(tr("image_only"), reply_markup=page_image_kb(p.id, len(images), p.type))
         return
     size = getattr(f, "file_size", 0) or 0
     if size > cfg.max_image_mb * 1024 * 1024:
         await msg.answer(
             tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
-            reply_markup=page_image_kb(p.id, len(images)),
+            reply_markup=page_image_kb(p.id, len(images), p.type),
         )
         return
 
@@ -406,23 +413,32 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     except BadImage as e:
         await msg.answer(
             tr("image_bad", error=str(e)),
-            reply_markup=page_image_kb(p.id, len(images)),
+            reply_markup=page_image_kb(p.id, len(images), p.type),
         )
         return
     except Exception:
         log.exception("page image download failed for user %s", msg.from_user.id)
         await msg.answer(
             tr("image_bad", error="не удалось скачать файл"),
-            reply_markup=page_image_kb(p.id, len(images)),
+            reply_markup=page_image_kb(p.id, len(images), p.type),
         )
         return
 
-    images.append(info.path.name)
+    if p.type == "news":
+        images = [info.path.name]
+    else:
+        images.append(info.path.name)
     set_page_images(p.data, images)
     safe_unlink(p.preview_path, cfg.work_dir, "preview_")
     p.preview_path = None
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height, p.id)
     await db.update_page(p)
+    if p.type == "news":
+        await msg.answer(
+            f"Картинку поставил {len(images)}/1\nМожешь нажать Готово",
+            reply_markup=page_image_kb(p.id, len(images), p.type),
+        )
+        return
     await state.update_data(
         page_id=p.id,
         caption_path=info.path.name,
@@ -456,6 +472,8 @@ async def page_image_action(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
         await render_saved(q.message, p, db, cfg)
         return
     if action == "cap" and len(parts) == 4:
+        if p.type == "news":
+            return
         i = int(parts[3])
         if not 0 <= i < len(images):
             return
@@ -483,7 +501,7 @@ async def page_image_action(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
         safe_unlink(old, cfg.work_dir, "media_")
     await q.message.answer(
         tr("image_removed", number=i + 1, count=len(images)),
-        reply_markup=page_image_kb(page_id, len(images)),
+        reply_markup=page_image_kb(page_id, len(images), p.type),
     )
 
 
@@ -514,7 +532,7 @@ async def take_page_image_caption(msg: Message, state: FSMContext, db: Db, cfg: 
     path = str(d.get("caption_path") or "")
     if path not in images:
         await state.set_state(EditPage.image)
-        await msg.answer(tr("images_continue"), reply_markup=page_image_kb(page_id, len(images)))
+        await msg.answer(tr("images_continue"), reply_markup=page_image_kb(page_id, len(images), p.type))
         return
 
     set_image_caption(p.data, path, s)
@@ -523,7 +541,7 @@ async def take_page_image_caption(msg: Message, state: FSMContext, db: Db, cfg: 
     await db.update_page(p)
     await state.update_data(page_id=page_id, caption_path=None, caption_i=None)
     await state.set_state(EditPage.image)
-    await msg.answer(tr("image_caption_saved"), reply_markup=page_image_kb(page_id, len(images)))
+    await msg.answer(tr("image_caption_saved"), reply_markup=page_image_kb(page_id, len(images), p.type))
 
 
 @router.callback_query(EditPage.image_caption, F.data.startswith("pc:"))
@@ -554,7 +572,7 @@ async def page_image_caption_action(
 
     await state.update_data(page_id=page_id, caption_path=None, caption_i=None)
     await state.set_state(EditPage.image)
-    await q.message.answer(text, reply_markup=page_image_kb(page_id, len(images)))
+    await q.message.answer(text, reply_markup=page_image_kb(page_id, len(images), p.type))
 
 
 @router.callback_query(F.data.startswith("p:t:"))

@@ -67,32 +67,40 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
     )
 
 
-def image_kb(count: int = 0) -> InlineKeyboardMarkup:
+def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
     rows = []
+    single = page_type == "news"
     if count:
         rows.append([ib(f"✅ Готово ({count})", "img:done")])
         for i in range(count):
-            rows.append(
-                [
-                    ib(f"✏️ Подпись {i + 1}", f"img:cap:{i}"),
-                    ib(f"🗑 Картинка {i + 1}", f"img:rm:{i}"),
-                ]
-            )
+            if single:
+                rows.append([ib("🗑 Убрать картинку", f"img:rm:{i}")])
+            else:
+                rows.append(
+                    [
+                        ib(f"✏️ Подпись {i + 1}", f"img:cap:{i}"),
+                        ib(f"🗑 Картинка {i + 1}", f"img:rm:{i}"),
+                    ]
+                )
     else:
-        rows.append([ib("⏭ Без изображений", "img:done")])
+        rows.append([ib("⏭ Без картинки" if single else "⏭ Без изображений", "img:done")])
     rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def page_image_kb(page_id: int, count: int) -> InlineKeyboardMarkup:
+def page_image_kb(page_id: int, count: int, page_type: str = "") -> InlineKeyboardMarkup:
     rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done")]]
+    single = page_type == "news"
     for i in range(count):
-        rows.append(
-            [
-                ib(f"✏️ Подпись {i + 1}", f"pi:{page_id}:cap:{i}"),
-                ib(f"🗑 Картинка {i + 1}", f"pi:{page_id}:rm:{i}"),
-            ]
-        )
+        if single:
+            rows.append([ib("🗑 Убрать картинку", f"pi:{page_id}:rm:{i}")])
+        else:
+            rows.append(
+                [
+                    ib(f"✏️ Подпись {i + 1}", f"pi:{page_id}:cap:{i}"),
+                    ib(f"🗑 Картинка {i + 1}", f"pi:{page_id}:rm:{i}"),
+                ]
+            )
     rows.append([ib("⬅️ К странице", f"p:o:{page_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -179,14 +187,18 @@ def olddoc_options_kb(
 def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMarkup:
     rows = [
         [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
-        [ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")],
     ]
+    if page_type == "news":
+        rows.append([ib("🖼 Картинка", "draft:image")])
+    else:
+        rows.append([ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")])
     if page_type == "battle":
         rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
     if theme == "olddoc" and page_type == "country":
         rows.append([ib("📜 Варианты документа", "draft:olddoc")])
+    if page_type != "news":
+        rows.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
     rows += [
-        [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
         [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
         [ib("❌ Отмена", "draft:cancel")],
     ]
@@ -230,18 +242,21 @@ def fields_kb(tpl: Template, data: dict, page_id: int | None = None) -> InlineKe
             cb = f"dx:{i}:{j}" if page_id is None else f"pe:{page_id}:x:{i}:{j}"
             rows.append([ib(f"↳ ✓ {name}", cb)])
 
+    is_news = tpl.key == "news"
     if page_id is None:
-        rows += [
-            [ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")],
-            [ib("🖼 Изображения", "draft:image")],
-            [ib("⬅️ К предпросмотру", "draft:back")],
-        ]
+        extra = []
+        if not is_news:
+            extra.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
+        extra.append([ib("🖼 Картинка" if is_news else "🖼 Изображения", "draft:image")])
+        extra.append([ib("⬅️ К предпросмотру", "draft:back")])
+        rows += extra
     else:
-        rows += [
-            [ib("➕ Свое поле", f"pa:{page_id}:custom"), ib("🧩 Свой раздел", f"pa:{page_id}:section")],
-            [ib("🖼 Изображения", f"pa:{page_id}:image")],
-            [ib("⬅️ К странице", f"p:o:{page_id}")],
-        ]
+        extra = []
+        if not is_news:
+            extra.append([ib("➕ Свое поле", f"pa:{page_id}:custom"), ib("🧩 Свой раздел", f"pa:{page_id}:section")])
+        extra.append([ib("🖼 Картинка" if is_news else "🖼 Изображения", f"pa:{page_id}:image")])
+        extra.append([ib("⬅️ К странице", f"p:o:{page_id}")])
+        rows += extra
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

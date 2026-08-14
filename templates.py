@@ -166,15 +166,13 @@ NEWS = Template(
     key="news",
     label="Новости (БЕТА)",
     emoji="📰",
-    image_label="картинка к новости",
+    image_label="одна картинка к новости",
     subtitle_key=None,
     wizard=("title", "body", "button_text"),
     fields=(
         f("title", "Заголовок", "Новость"),
         f("body", "Текст новости", "Новость", multiline=True),
         f("button_text", "Текст на кнопке", "Новость"),
-        f("url", "Адрес в строке браузера", "Оформление"),
-        f("tab_title", "Название вкладки", "Оформление"),
     ),
 )
 

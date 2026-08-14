@@ -72,16 +72,23 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         await state.set_state(NewPage.image)
         await state.update_data(image_mode="initial")
         count = len(page_images(d.get("page_data") or {}))
-        await msg.answer(
-            tr(
+        ptype = d.get("type") or ""
+        max_count = 1 if ptype == "news" else MAX_PAGE_IMAGES
+        if ptype == "news":
+            text = (
+                f"Кинь одну картинку к новости\n"
+                f"PNG JPEG или WEBP до {d.get('max_image_mb', 12)} МБ\n\n"
+                f"Сейчас: {count}/{max_count}"
+            )
+        else:
+            text = tr(
                 "send_image",
                 label=tpl.image_label.lower(),
                 max_mb=d.get("max_image_mb", 12),
                 count=count,
-                max_count=MAX_PAGE_IMAGES,
-            ),
-            reply_markup=image_kb(count),
-        )
+                max_count=max_count,
+            )
+        await msg.answer(text, reply_markup=image_kb(count, ptype))
         return
 
     f = tpl.get_field(tpl.wizard[i])
@@ -321,7 +328,7 @@ async def remove_draft_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: C
         safe_unlink(old, cfg.work_dir, "media_")
     await q.message.answer(
         tr("image_removed", number=i + 1, count=len(images)),
-        reply_markup=image_kb(len(images)),
+        reply_markup=image_kb(len(images), d.get("type") or ""),
     )
 
 
@@ -350,23 +357,25 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     d = await state.get_data()
     data = d.get("page_data") or {}
     images = page_images(data)
-    if len(images) >= MAX_PAGE_IMAGES:
+    ptype = d.get("type") or ""
+    max_count = 1 if ptype == "news" else MAX_PAGE_IMAGES
+    if len(images) >= max_count:
         await msg.answer(
-            tr("image_limit", max_count=MAX_PAGE_IMAGES),
-            reply_markup=image_kb(len(images)),
+            tr("image_limit", max_count=max_count),
+            reply_markup=image_kb(len(images), ptype),
         )
         return
 
     f = msg.photo[-1] if msg.photo else msg.document
     if not f:
-        await msg.answer(tr("image_only"), reply_markup=image_kb(len(images)))
+        await msg.answer(tr("image_only"), reply_markup=image_kb(len(images), ptype))
         return
 
     size = getattr(f, "file_size", 0) or 0
     if size > cfg.max_image_mb * 1024 * 1024:
         await msg.answer(
             tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
-            reply_markup=image_kb(len(images)),
+            reply_markup=image_kb(len(images), ptype),
         )
         return
 
@@ -375,27 +384,40 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         await bot.download(f, destination=buf)
         info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
     except BadImage as e:
-        await msg.answer(tr("image_bad", error=str(e)), reply_markup=image_kb(len(images)))
+        await msg.answer(tr("image_bad", error=str(e)), reply_markup=image_kb(len(images), ptype))
         return
     except Exception:
         log.exception("telegram image download failed for user %s", msg.from_user.id)
         await msg.answer(
             tr("image_bad", error="не удалось скачать файл"),
-            reply_markup=image_kb(len(images)),
+            reply_markup=image_kb(len(images), ptype),
         )
         return
 
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
-    images.append(info.path.name)
+    # news — только одна картинка, старую выкидываем
+    if ptype == "news":
+        images = [info.path.name]
+    else:
+        images.append(info.path.name)
     set_page_images(data, images)
+    await state.update_data(page_data=data)
+
+    if ptype == "news":
+        await state.update_data(caption_path=None, caption_i=None)
+        await msg.answer(
+            f"Картинку поставил {len(images)}/{max_count}\nМожешь нажать Готово",
+            reply_markup=image_kb(len(images), ptype),
+        )
+        return
+
     await state.update_data(
-        page_data=data,
         caption_path=info.path.name,
         caption_i=len(images) - 1,
     )
     await state.set_state(NewPage.image_caption)
     await msg.answer(
-        tr("image_saved", count=len(images), max_count=MAX_PAGE_IMAGES)
+        tr("image_saved", count=len(images), max_count=max_count)
         + "\n\n"
         + tr("image_caption_prompt", number=len(images), limit=IMAGE_CAPTION_LIMIT),
         reply_markup=image_caption_kb(),
@@ -422,15 +444,16 @@ async def take_draft_image_caption(msg: Message, state: FSMContext) -> None:
     data = d.get("page_data") or {}
     images = page_images(data)
     path = str(d.get("caption_path") or "")
+    ptype = d.get("type") or ""
     if path not in images:
         await state.set_state(NewPage.image)
-        await msg.answer(tr("images_continue"), reply_markup=image_kb(len(images)))
+        await msg.answer(tr("images_continue"), reply_markup=image_kb(len(images), ptype))
         return
 
     set_image_caption(data, path, s)
     await state.update_data(page_data=data, caption_path=None, caption_i=None)
     await state.set_state(NewPage.image)
-    await msg.answer(tr("image_caption_saved"), reply_markup=image_kb(len(images)))
+    await msg.answer(tr("image_caption_saved"), reply_markup=image_kb(len(images), ptype))
 
 
 @router.callback_query(NewPage.image_caption, F.data.startswith("imgcap:"))
@@ -451,7 +474,7 @@ async def draft_image_caption_action(q: CallbackQuery, state: FSMContext) -> Non
 
     await state.update_data(caption_path=None, caption_i=None)
     await state.set_state(NewPage.image)
-    await q.message.answer(text, reply_markup=image_kb(len(images)))
+    await q.message.answer(text, reply_markup=image_kb(len(images), d.get("type") or ""))
 
 
 @router.callback_query(F.data.startswith("dt:"))
@@ -468,15 +491,18 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, 
             await state.set_state(NewPage.image)
             await state.update_data(image_mode="initial")
             tpl = get_template(d["type"])
+            ptype = d.get("type") or ""
+            cnt = len(page_images(d.get("page_data") or {}))
+            max_c = 1 if ptype == "news" else MAX_PAGE_IMAGES
             await q.message.answer(
                 tr(
                     "send_image",
                     label=tpl.image_label.lower(),
                     max_mb=cfg.max_image_mb,
-                    count=len(page_images(d.get("page_data") or {})),
-                    max_count=MAX_PAGE_IMAGES,
+                    count=cnt,
+                    max_count=max_c,
                 ),
-                reply_markup=image_kb(len(page_images(d.get("page_data") or {}))),
+                reply_markup=image_kb(cnt, ptype),
             )
         elif cur == NewPage.quick.state:
             await show_quick(q.message, state)
@@ -620,6 +646,9 @@ async def add_draft_custom(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
+    if d.get("type") == "news":
+        await q.message.answer("В новостях свои поля не нужны")
+        return
     if len((d.get("page_data") or {}).get("custom_fields") or []) >= 20:
         await q.message.answer(tr("limit_reached"))
         return
@@ -659,6 +688,9 @@ async def add_draft_section(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
+    if d.get("type") == "news":
+        await q.message.answer("В новостях свои разделы не нужны")
+        return
     if len((d.get("page_data") or {}).get("sections") or []) >= 6:
         await q.message.answer(tr("limit_reached"))
         return
@@ -692,19 +724,26 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
         await q.message.answer(tr("draft_missing"))
         return
     tpl = get_template(d["type"])
+    ptype = d.get("type") or ""
     count = len(page_images(d.get("page_data") or {}))
+    max_c = 1 if ptype == "news" else MAX_PAGE_IMAGES
     await state.update_data(image_mode="draft")
     await state.set_state(NewPage.image)
-    await q.message.answer(
-        tr(
+    if ptype == "news":
+        text = (
+            f"Кинь одну картинку к новости\n"
+            f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n\n"
+            f"Сейчас: {count}/{max_c}"
+        )
+    else:
+        text = tr(
             "send_image",
             label=tpl.image_label.lower(),
             max_mb=cfg.max_image_mb,
             count=count,
-            max_count=MAX_PAGE_IMAGES,
-        ),
-        reply_markup=image_kb(count),
-    )
+            max_count=max_c,
+        )
+    await q.message.answer(text, reply_markup=image_kb(count, ptype))
 
 
 @router.callback_query(F.data == "draft:save")
