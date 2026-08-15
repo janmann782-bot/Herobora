@@ -825,18 +825,23 @@ def _render_superevent_tfr(
     here = Path(__file__).resolve().parent
     frame_path = here / "tfr_se_frame.png"
     grad_path = here / "tfr_se_grad.png"
+    btn_path = here / "tfr_se_btn.png"
     if not frame_path.exists() or not grad_path.exists():
         raise FileNotFoundError("не нашёл tfr_se_frame.png / tfr_se_grad.png рядом с ботом")
 
     frame = Image.open(frame_path).convert("RGBA")
     grad = Image.open(grad_path).convert("RGBA")
+    btn_panel = Image.open(btn_path).convert("RGBA") if btn_path.exists() else None
     fw, fh = frame.size
     if grad.size != (fw, fh):
         grad = grad.resize((fw, fh), Image.Resampling.LANCZOS)
+    if btn_panel is not None and btn_panel.size != (fw, fh):
+        btn_panel = btn_panel.resize((fw, fh), Image.Resampling.LANCZOS)
 
     # text regions measured on 2048x1536 template
     TITLE_Y0, TITLE_Y1 = 155, 230
-    BODY_BOX = (430, 990, 1620, 1145)  # x0,y0,x1,y1
+    # панель кнопки/текста (отдельный слой tfr_se_btn.png)
+    BODY_BOX = (450, 1010, 1600, 1240)
     BTN_BOX = (780, 1295, 1268, 1355)
     # main image area inside the frame
     # на всю внутреннюю область рамки, чтобы градиент лег на всё фото
@@ -883,6 +888,9 @@ def _render_superevent_tfr(
 
     # metal frame on top
     canvas = Image.alpha_composite(canvas, frame)
+    # отдельная кнопка/панель поверх рамки
+    if btn_panel is not None:
+        canvas = Image.alpha_composite(canvas, btn_panel)
     draw = ImageDraw.Draw(canvas)
 
     def load_font(name: str, size: int):

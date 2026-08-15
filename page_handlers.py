@@ -388,7 +388,7 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         return
     images = page_images(p.data)
     max_c = 1 if p.type in ("news", "superevent") else MAX_PAGE_IMAGES
-    if len(images) >= max_c and p.type != "news":
+    if len(images) >= max_c and p.type not in ("news", "superevent"):
         await msg.answer(
             tr("image_limit", max_count=max_c),
             reply_markup=page_image_kb(p.id, len(images), p.type),

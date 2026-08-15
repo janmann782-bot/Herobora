@@ -362,7 +362,8 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     images = page_images(data)
     ptype = d.get("type") or ""
     max_count = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
-    if len(images) >= max_count:
+    # для news/superevent при новой фотке просто заменяем, не блокируем
+    if len(images) >= max_count and ptype not in ("news", "superevent"):
         await msg.answer(
             tr("image_limit", max_count=max_count),
             reply_markup=image_kb(len(images), ptype),
