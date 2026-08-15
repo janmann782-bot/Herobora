@@ -36,8 +36,6 @@ from themes import get_theme
 from ui import (
     CREATE,
     HELP,
-    NEWS,
-    SUPEREVENT,
     STATS,
     MY_PAGES,
     SETTINGS,
@@ -853,7 +851,7 @@ async def quick_theme(q: CallbackQuery, state: FSMContext) -> None:
 @router.message(StateFilter(None), F.text)
 async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     text = msg.text.strip()
-    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP, NEWS, SUPEREVENT, STATS}:
+    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP, STATS}:
         return
     if text.startswith("/"):
         await msg.answer(tr("quick_hint"), reply_markup=main_menu())

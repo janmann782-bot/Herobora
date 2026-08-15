@@ -19,8 +19,6 @@ from ui import (
     HELP,
     SETTINGS,
     STATS,
-    NEWS,
-    SUPEREVENT,
     THEMES_BTN,
     main_menu,
     quality_kb,
@@ -69,18 +67,6 @@ async def help_message(msg: Message) -> None:
     await msg.answer(tr("help"), reply_markup=main_menu(), parse_mode="HTML")
 
 
-@router.message(F.text == NEWS)
-async def news_message(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
-    from create_handlers import begin_new_page
-
-    await begin_new_page(msg, state, db, cfg, msg.from_user.id, "news")
-
-
-@router.message(F.text == SUPEREVENT)
-async def superevent_message(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
-    from create_handlers import begin_new_page
-
-    await begin_new_page(msg, state, db, cfg, msg.from_user.id, "superevent")
 
 
 @router.message(Command("create"))

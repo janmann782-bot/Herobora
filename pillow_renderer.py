@@ -839,7 +839,8 @@ def _render_superevent_tfr(
     BODY_BOX = (430, 990, 1620, 1145)  # x0,y0,x1,y1
     BTN_BOX = (780, 1295, 1268, 1355)
     # main image area inside the frame
-    IMG_BOX = (80, 260, 1968, 960)
+    # на всю внутреннюю область рамки, чтобы градиент лег на всё фото
+    IMG_BOX = (50, 248, 1998, 1265)
 
     d = page.data
     title = str(d.get("title") or page.title or "Без названия").strip()

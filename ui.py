@@ -44,7 +44,6 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=CREATE), KeyboardButton(text=MY_PAGES)],
             [KeyboardButton(text=THEMES_BTN), KeyboardButton(text=SETTINGS)],
             [KeyboardButton(text=STATS), KeyboardButton(text=HELP)],
-            [KeyboardButton(text=NEWS), KeyboardButton(text=SUPEREVENT)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Создать карточку или прислать данные текстом",
