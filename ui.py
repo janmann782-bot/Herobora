@@ -34,8 +34,16 @@ T = TypeVar("T")
 TFR_SIMPLE_TYPES = frozenset({"news", "superevent"})
 
 
-def ib(text: str, data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=data)
+def ib(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
+    # style: primary (синяя) / success (зелёная) / danger (красная) — Bot API 9.4+
+    kwargs = {"text": text, "callback_data": data}
+    if style:
+        kwargs["style"] = style
+    try:
+        return InlineKeyboardButton(**kwargs)
+    except TypeError:
+        # старый aiogram без style
+        return InlineKeyboardButton(text=text, callback_data=data)
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -51,11 +59,11 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 
 def types_kb() -> InlineKeyboardMarkup:
-    rows = [
-        [ib(f"{x.emoji} {x.label}", f"new:{x.key}")]
-        for x in TEMPLATES.values()
-    ]
-    rows.append([ib("❌ Отмена", "flow:cancel")])
+    rows = []
+    for x in TEMPLATES.values():
+        style = "primary" if x.key in TFR_SIMPLE_TYPES else None
+        rows.append([ib(f"{x.emoji} {x.label}", f"new:{x.key}", style=style)])
+    rows.append([ib("❌ Отмена", "flow:cancel", style="danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -65,16 +73,18 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
         row.append(ib("⬅️ Назад", "wiz:back"))
     if can_skip:
         row.append(ib("⏭ Пропустить", "wiz:skip"))
-    return InlineKeyboardMarkup(
-        inline_keyboard=[row, [ib("❌ Отмена", "flow:cancel")]]
-    )
+    rows = []
+    if row:
+        rows.append(row)
+    rows.append([ib("❌ Отмена", "flow:cancel", style="danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
     rows = []
     single = page_type in TFR_SIMPLE_TYPES
     if count:
-        rows.append([ib(f"✅ Готово ({count})", "img:done")])
+        rows.append([ib(f"✅ Готово ({count})", "img:done", style="success")])
         for i in range(count):
             if single:
                 rows.append([ib("🗑 Убрать картинку", f"img:rm:{i}")])
@@ -87,12 +97,12 @@ def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
                 )
     else:
         rows.append([ib("⏭ Без картинки" if single else "⏭ Без изображений", "img:done")])
-    rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel")]]
+    rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel", style="danger")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def page_image_kb(page_id: int, count: int, page_type: str = "") -> InlineKeyboardMarkup:
-    rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done")]]
+    rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done", style="success")]]
     single = page_type in TFR_SIMPLE_TYPES
     for i in range(count):
         if single:
@@ -189,7 +199,7 @@ def olddoc_options_kb(
 
 def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMarkup:
     rows = [
-        [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
+        [ib("✅ Сохранить", "draft:save", style="success"), ib("✏️ Поля", "draft:fields")],
     ]
     if page_type in TFR_SIMPLE_TYPES:
         rows.append([ib("🖼 Картинка", "draft:image")])
@@ -203,7 +213,7 @@ def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMar
         rows.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
     rows += [
         [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
-        [ib("❌ Отмена", "draft:cancel")],
+        [ib("❌ Отмена", "draft:cancel", style="danger")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -213,7 +223,7 @@ def quick_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [ib("👁 Предпросмотр", "quick:preview"), ib("✏️ Проверить поля", "quick:fields")],
             [ib("🎨 Выбрать тему", "quick:theme"), ib("📋 Выслать текстом", "quick:text")],
-            [ib("❌ Отмена", "flow:cancel")],
+            [ib("❌ Отмена", "flow:cancel", style="danger")],
         ]
     )
 
@@ -413,3 +423,78 @@ async def send_png(
         return await msg.answer_document(
             FSInputFile(path), caption=caption[:1024], reply_markup=markup
         )
+
+
+DIV = "▬▬ι══════════════ι▬▬"
+
+
+def box(text: str) -> str:
+    """Рамка-разделитель вокруг блока текста."""
+    body = (text or "").strip()
+    return f"{DIV}\n{body}\n{DIV}"
+
+
+def quote(text: str) -> str:
+    """Цитата (HTML blockquote)."""
+    body = (text or "").strip()
+    if not body:
+        return ""
+    # экранируем только если вызывающий не прислал готовый HTML
+    return f"<blockquote>{body}</blockquote>"
+
+
+async def flow_show(
+    target,
+    state,
+    text: str,
+    reply_markup=None,
+    parse_mode: str | None = "HTML",
+    *,
+    as_new: bool = False,
+):
+    """Обновляет одно сообщение мастера вместо спама новыми.
+
+    target — Message или CallbackQuery.
+    state  — FSMContext.
+    """
+    from aiogram.types import CallbackQuery, Message
+
+    msg: Message | None = None
+    if isinstance(target, CallbackQuery):
+        msg = target.message
+    elif isinstance(target, Message):
+        msg = target
+
+    d = await state.get_data()
+    mid = d.get("flow_message_id")
+    chat_id = d.get("flow_chat_id")
+
+    # пробуем edit существующего
+    if not as_new and msg is not None and mid and chat_id:
+        try:
+            if msg.message_id == mid and msg.text is not None:
+                await msg.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+                return msg
+            # другое сообщение — edit по id
+            bot = msg.bot
+            await bot.edit_message_text(
+                text,
+                chat_id=chat_id,
+                message_id=mid,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return msg
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+
+    # fallback: новое сообщение
+    if isinstance(target, CallbackQuery):
+        sent = await target.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    else:
+        sent = await target.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    await state.update_data(flow_message_id=sent.message_id, flow_chat_id=sent.chat.id)
+    return sent
+

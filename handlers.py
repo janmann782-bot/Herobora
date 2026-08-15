@@ -25,6 +25,7 @@ from ui import (
     settings_kb,
     themes_kb,
     types_kb,
+    flow_show,
 )
 
 router = Router(name="common")
@@ -73,7 +74,7 @@ async def help_message(msg: Message) -> None:
 @router.message(F.text == CREATE)
 async def create(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
-    await msg.answer(tr("choose_type"), reply_markup=types_kb(), parse_mode="HTML")
+    await flow_show(msg, state, tr("choose_type"), types_kb(), as_new=True)
 
 
 @router.message(Command("cancel"))

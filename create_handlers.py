@@ -76,9 +76,12 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         if ptype in ("news", "superevent"):
             label = "суперевенту" if ptype == "superevent" else "новости"
             text = (
-                f"Кинь одну картинку к {label}\n"
-                f"PNG JPEG или WEBP до {d.get('max_image_mb', 12)} МБ\n\n"
-                f"Сейчас: {count}/{max_count}"
+                f"▬▬ι══════════════ι▬▬\n"
+                f"<b>Картинка</b>\n"
+                f"Кинь одну к {label}\n"
+                f"PNG JPEG WEBP до {d.get('max_image_mb', 12)} МБ\n"
+                f"Сейчас: {count}/{max_count}\n"
+                f"▬▬ι══════════════ι▬▬"
             )
         else:
             text = tr(
@@ -88,7 +91,7 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
                 count=count,
                 max_count=max_count,
             )
-        await msg.answer(text, reply_markup=image_kb(count, ptype))
+        await flow_show(msg, state, text, image_kb(count, ptype))
         return
 
     f = tpl.get_field(tpl.wizard[i])
@@ -96,9 +99,11 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
     s = tr("field_prompt", label=f.label, hint=hint, step=i + 1, total=len(tpl.wizard))
     current = (d.get("page_data") or {}).get(f.key)
     if current:
-        s += "\n\n" + tr("current_value", value=str(current)[:500])
+        # value в current_value уже в blockquote — экранируем HTML
+        from html import escape
+        s += "\n\n" + tr("current_value", value=escape(str(current)[:500]))
     await state.set_state(NewPage.field)
-    await msg.answer(s, reply_markup=wizard_kb(can_skip=f.key != "title"))
+    await flow_show(msg, state, s, wizard_kb(can_skip=f.key != "title"))
 
 
 def make_draft(d: dict, user_id: int) -> Page:
@@ -207,6 +212,10 @@ async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, u
     except ValueError:
         return
     s = await db.get_settings(user_id)
+    # сохраняем id текущего сообщения мастера, если оно уже есть
+    prev = await state.get_data()
+    flow_mid = prev.get("flow_message_id") or (msg.message_id if msg else None)
+    flow_cid = prev.get("flow_chat_id") or (msg.chat.id if msg else None)
     await clear_flow(state, user_id, db, cfg)
     theme = "fire_rises" if kind in ("news", "superevent") else s.theme
     await state.update_data(
@@ -218,6 +227,8 @@ async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, u
         max_image_mb=cfg.max_image_mb,
         creation_log_sent=False,
         generation_counted=False,
+        flow_message_id=flow_mid,
+        flow_chat_id=flow_cid,
     )
     await state.set_state(NewPage.field)
     await ask_field(msg, state)
@@ -282,7 +293,7 @@ async def back_field(q: CallbackQuery, state: FSMContext) -> None:
     i = int(d.get("i", 0))
     if i <= 0:
         await state.clear()
-        await q.message.answer(tr("choose_type"), reply_markup=types_kb(), parse_mode="HTML")
+        await flow_show(q, state, tr("choose_type"), types_kb(), as_new=True)
         return
     await state.update_data(i=i - 1)
     await ask_field(q.message, state)
@@ -545,7 +556,7 @@ async def draft_fields(q: CallbackQuery, state: FSMContext) -> None:
     await q.message.answer(
         tr("fields_title"),
         reply_markup=fields_kb(get_template(d["type"]), d.get("page_data") or {}),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -835,7 +846,7 @@ async def quick_fields(q: CallbackQuery, state: FSMContext) -> None:
     await q.message.answer(
         tr("fields_title"),
         reply_markup=fields_kb(get_template(d["type"]), d.get("page_data") or {}),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
