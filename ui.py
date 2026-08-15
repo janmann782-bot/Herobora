@@ -34,16 +34,8 @@ T = TypeVar("T")
 TFR_SIMPLE_TYPES = frozenset({"news", "superevent"})
 
 
-def ib(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
-    # style: primary (синяя) / success (зелёная) / danger (красная) — Bot API 9.4+
-    kwargs = {"text": text, "callback_data": data}
-    if style:
-        kwargs["style"] = style
-    try:
-        return InlineKeyboardButton(**kwargs)
-    except TypeError:
-        # старый aiogram без style
-        return InlineKeyboardButton(text=text, callback_data=data)
+def ib(text: str, data: str, **_kwargs) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=data)
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -61,9 +53,8 @@ def main_menu() -> ReplyKeyboardMarkup:
 def types_kb() -> InlineKeyboardMarkup:
     rows = []
     for x in TEMPLATES.values():
-        style = "primary" if x.key in TFR_SIMPLE_TYPES else None
-        rows.append([ib(f"{x.emoji} {x.label}", f"new:{x.key}", style=style)])
-    rows.append([ib("❌ Отмена", "flow:cancel", style="danger")])
+        rows.append([ib(f"{x.emoji} {x.label}", f"new:{x.key}")])
+    rows.append([ib("❌ Отмена", "flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -76,7 +67,7 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
     rows = []
     if row:
         rows.append(row)
-    rows.append([ib("❌ Отмена", "flow:cancel", style="danger")])
+    rows.append([ib("❌ Отмена", "flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -84,7 +75,7 @@ def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
     rows = []
     single = page_type in TFR_SIMPLE_TYPES
     if count:
-        rows.append([ib(f"✅ Готово ({count})", "img:done", style="success")])
+        rows.append([ib(f"✅ Готово ({count})", "img:done")])
         for i in range(count):
             if single:
                 rows.append([ib("🗑 Убрать картинку", f"img:rm:{i}")])
@@ -97,12 +88,12 @@ def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
                 )
     else:
         rows.append([ib("⏭ Без картинки" if single else "⏭ Без изображений", "img:done")])
-    rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel", style="danger")]]
+    rows += [[ib("⬅️ Назад", "img:back")], [ib("❌ Отмена", "flow:cancel")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def page_image_kb(page_id: int, count: int, page_type: str = "") -> InlineKeyboardMarkup:
-    rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done", style="success")]]
+    rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done")]]
     single = page_type in TFR_SIMPLE_TYPES
     for i in range(count):
         if single:
@@ -199,7 +190,7 @@ def olddoc_options_kb(
 
 def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMarkup:
     rows = [
-        [ib("✅ Сохранить", "draft:save", style="success"), ib("✏️ Поля", "draft:fields")],
+        [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
     ]
     if page_type in TFR_SIMPLE_TYPES:
         rows.append([ib("🖼 Картинка", "draft:image")])
@@ -213,7 +204,7 @@ def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMar
         rows.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
     rows += [
         [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
-        [ib("❌ Отмена", "draft:cancel", style="danger")],
+        [ib("❌ Отмена", "draft:cancel")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -223,7 +214,7 @@ def quick_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [ib("👁 Предпросмотр", "quick:preview"), ib("✏️ Проверить поля", "quick:fields")],
             [ib("🎨 Выбрать тему", "quick:theme"), ib("📋 Выслать текстом", "quick:text")],
-            [ib("❌ Отмена", "flow:cancel", style="danger")],
+            [ib("❌ Отмена", "flow:cancel")],
         ]
     )
 
