@@ -869,17 +869,16 @@ def _render_superevent_tfr(
                 pass
 
     # additive blend of pink-blue gradient over everything so far
+    # result = min(255, base + grad * alpha)  — без numpy
+    from PIL import ImageChops
+
     base = canvas.convert("RGB")
     g_rgb = grad.convert("RGB")
     g_a = grad.split()[-1]
-    # result = min(255, base + grad * alpha)
-    import numpy as np
-
-    b = np.asarray(base, dtype=np.float32)
-    g = np.asarray(g_rgb, dtype=np.float32)
-    a = np.asarray(g_a, dtype=np.float32) / 255.0
-    added = np.clip(b + g * a[:, :, None], 0, 255).astype(np.uint8)
-    canvas = Image.fromarray(added, "RGB").convert("RGBA")
+    premul = Image.new("RGB", base.size, (0, 0, 0))
+    premul.paste(g_rgb, mask=g_a)  # = grad * alpha
+    added = ImageChops.add(base, premul)  # clip 0..255
+    canvas = added.convert("RGBA")
 
     # metal frame on top
     canvas = Image.alpha_composite(canvas, frame)
