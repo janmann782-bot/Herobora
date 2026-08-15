@@ -37,6 +37,7 @@ from ui import (
     CREATE,
     HELP,
     NEWS,
+    SUPEREVENT,
     STATS,
     MY_PAGES,
     SETTINGS,
@@ -73,10 +74,11 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         await state.update_data(image_mode="initial")
         count = len(page_images(d.get("page_data") or {}))
         ptype = d.get("type") or ""
-        max_count = 1 if ptype == "news" else MAX_PAGE_IMAGES
-        if ptype == "news":
+        max_count = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
+        if ptype in ("news", "superevent"):
+            label = "суперевенту" if ptype == "superevent" else "новости"
             text = (
-                f"Кинь одну картинку к новости\n"
+                f"Кинь одну картинку к {label}\n"
                 f"PNG JPEG или WEBP до {d.get('max_image_mb', 12)} МБ\n\n"
                 f"Сейчас: {count}/{max_count}"
             )
@@ -201,18 +203,14 @@ async def show_quick(msg: Message, state: FSMContext) -> None:
     await msg.answer(d.get("quick_text", tr("draft_missing")), reply_markup=quick_kb())
 
 
-@router.callback_query(F.data.startswith("new:"))
-async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
-    await q.answer()
-    kind = q.data.split(":", 1)[1]
+async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, user_id: int, kind: str) -> None:
     try:
         get_template(kind)
     except ValueError:
         return
-
-    s = await db.get_settings(q.from_user.id)
-    await clear_flow(state, q.from_user.id, db, cfg)
-    theme = "fire_rises" if kind == "news" else s.theme
+    s = await db.get_settings(user_id)
+    await clear_flow(state, user_id, db, cfg)
+    theme = "fire_rises" if kind in ("news", "superevent") else s.theme
     await state.update_data(
         type=kind,
         page_data={},
@@ -224,7 +222,14 @@ async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) ->
         generation_counted=False,
     )
     await state.set_state(NewPage.field)
-    await ask_field(q.message, state)
+    await ask_field(msg, state)
+
+
+@router.callback_query(F.data.startswith("new:"))
+async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    kind = q.data.split(":", 1)[1]
+    await begin_new_page(q.message, state, db, cfg, q.from_user.id, kind)
 
 
 @router.message(NewPage.field)
@@ -358,7 +363,7 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     data = d.get("page_data") or {}
     images = page_images(data)
     ptype = d.get("type") or ""
-    max_count = 1 if ptype == "news" else MAX_PAGE_IMAGES
+    max_count = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
     if len(images) >= max_count:
         await msg.answer(
             tr("image_limit", max_count=max_count),
@@ -396,14 +401,14 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
 
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
     # news — только одна картинка, старую выкидываем
-    if ptype == "news":
+    if ptype in ("news", "superevent"):
         images = [info.path.name]
     else:
         images.append(info.path.name)
     set_page_images(data, images)
     await state.update_data(page_data=data)
 
-    if ptype == "news":
+    if ptype in ("news", "superevent"):
         await state.update_data(caption_path=None, caption_i=None)
         await msg.answer(
             f"Картинку поставил {len(images)}/{max_count}\nМожешь нажать Готово",
@@ -493,7 +498,7 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, 
             tpl = get_template(d["type"])
             ptype = d.get("type") or ""
             cnt = len(page_images(d.get("page_data") or {}))
-            max_c = 1 if ptype == "news" else MAX_PAGE_IMAGES
+            max_c = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
             await q.message.answer(
                 tr(
                     "send_image",
@@ -647,8 +652,8 @@ async def add_draft_custom(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    if d.get("type") == "news":
-        await q.message.answer("В новостях свои поля не нужны")
+    if d.get("type") in ("news", "superevent"):
+        await q.message.answer("Тут свои поля не нужны")
         return
     if len((d.get("page_data") or {}).get("custom_fields") or []) >= 20:
         await q.message.answer(tr("limit_reached"))
@@ -689,8 +694,8 @@ async def add_draft_section(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    if d.get("type") == "news":
-        await q.message.answer("В новостях свои разделы не нужны")
+    if d.get("type") in ("news", "superevent"):
+        await q.message.answer("Тут свои разделы не нужны")
         return
     if len((d.get("page_data") or {}).get("sections") or []) >= 6:
         await q.message.answer(tr("limit_reached"))
@@ -727,12 +732,13 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
     tpl = get_template(d["type"])
     ptype = d.get("type") or ""
     count = len(page_images(d.get("page_data") or {}))
-    max_c = 1 if ptype == "news" else MAX_PAGE_IMAGES
+    max_c = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
     await state.update_data(image_mode="draft")
     await state.set_state(NewPage.image)
-    if ptype == "news":
+    if ptype in ("news", "superevent"):
+        label = "суперевенту" if ptype == "superevent" else "новости"
         text = (
-            f"Кинь одну картинку к новости\n"
+            f"Кинь одну картинку к {label}\n"
             f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n\n"
             f"Сейчас: {count}/{max_c}"
         )
@@ -847,7 +853,7 @@ async def quick_theme(q: CallbackQuery, state: FSMContext) -> None:
 @router.message(StateFilter(None), F.text)
 async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
     text = msg.text.strip()
-    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP, NEWS, STATS}:
+    if text in {CREATE, MY_PAGES, THEMES_BTN, SETTINGS, HELP, NEWS, SUPEREVENT, STATS}:
         return
     if text.startswith("/"):
         await msg.answer(tr("quick_hint"), reply_markup=main_menu())

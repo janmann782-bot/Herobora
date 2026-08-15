@@ -27,7 +27,11 @@ SETTINGS = "⚙️ Настройки"
 HELP = "ℹ️ Помощь"
 STATS = "🥰Статистика"
 NEWS = "📰 Новость"
+SUPEREVENT = "‼️ Суперевент (БЕТА)"
 T = TypeVar("T")
+
+# типы с одной картинкой без своих полей
+TFR_SIMPLE_TYPES = frozenset({"news", "superevent"})
 
 
 def ib(text: str, data: str) -> InlineKeyboardButton:
@@ -40,7 +44,7 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=CREATE), KeyboardButton(text=MY_PAGES)],
             [KeyboardButton(text=THEMES_BTN), KeyboardButton(text=SETTINGS)],
             [KeyboardButton(text=STATS), KeyboardButton(text=HELP)],
-            [KeyboardButton(text=NEWS)],
+            [KeyboardButton(text=NEWS), KeyboardButton(text=SUPEREVENT)],
         ],
         resize_keyboard=True,
         input_field_placeholder="Создать карточку или прислать данные текстом",
@@ -69,7 +73,7 @@ def wizard_kb(can_back: bool = True, can_skip: bool = True) -> InlineKeyboardMar
 
 def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
     rows = []
-    single = page_type == "news"
+    single = page_type in TFR_SIMPLE_TYPES
     if count:
         rows.append([ib(f"✅ Готово ({count})", "img:done")])
         for i in range(count):
@@ -90,7 +94,7 @@ def image_kb(count: int = 0, page_type: str = "") -> InlineKeyboardMarkup:
 
 def page_image_kb(page_id: int, count: int, page_type: str = "") -> InlineKeyboardMarkup:
     rows = [[ib(f"✅ Готово ({count})", f"pi:{page_id}:done")]]
-    single = page_type == "news"
+    single = page_type in TFR_SIMPLE_TYPES
     for i in range(count):
         if single:
             rows.append([ib("🗑 Убрать картинку", f"pi:{page_id}:rm:{i}")])
@@ -188,7 +192,7 @@ def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMar
     rows = [
         [ib("✅ Сохранить", "draft:save"), ib("✏️ Поля", "draft:fields")],
     ]
-    if page_type == "news":
+    if page_type in TFR_SIMPLE_TYPES:
         rows.append([ib("🖼 Картинка", "draft:image")])
     else:
         rows.append([ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")])
@@ -196,7 +200,7 @@ def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMar
         rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
     if theme == "olddoc" and page_type == "country":
         rows.append([ib("📜 Варианты документа", "draft:olddoc")])
-    if page_type != "news":
+    if page_type not in TFR_SIMPLE_TYPES:
         rows.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
     rows += [
         [ib("📤 Экспорт PNG", "draft:export"), ib("📋 Выслать текстом", "draft:text")],
@@ -242,7 +246,7 @@ def fields_kb(tpl: Template, data: dict, page_id: int | None = None) -> InlineKe
             cb = f"dx:{i}:{j}" if page_id is None else f"pe:{page_id}:x:{i}:{j}"
             rows.append([ib(f"↳ ✓ {name}", cb)])
 
-    is_news = tpl.key == "news"
+    is_news = tpl.key in TFR_SIMPLE_TYPES
     if page_id is None:
         extra = []
         if not is_news:

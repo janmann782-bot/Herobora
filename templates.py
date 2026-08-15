@@ -177,7 +177,22 @@ NEWS = Template(
 )
 
 
-TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON, NEWS)}
+SUPEREVENT = Template(
+    key="superevent",
+    label="Суперевент (БЕТА)",
+    emoji="‼️",
+    image_label="одна картинка к суперевенту",
+    subtitle_key=None,
+    wizard=("title", "body", "button_text"),
+    fields=(
+        f("title", "Заголовок", "Суперевент"),
+        f("body", "Текст суперевента", "Суперевент", multiline=True),
+        f("button_text", "Текст на кнопке", "Суперевент"),
+    ),
+)
+
+
+TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON, NEWS, SUPEREVENT)}
 
 
 def get_template(key: str) -> Template:

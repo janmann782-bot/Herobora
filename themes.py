@@ -158,8 +158,8 @@ THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC, FIRE_RISES)}
 # Theme available only for these page types (missing key = all types)
 THEME_PAGE_TYPES: dict[str, set[str] | None] = {
     "olddoc": {"country"},
-    "fire_rises": {"news"},
-    # ordinary themes not for news — news only has TFR for now
+    "fire_rises": {"news", "superevent"},
+    # ordinary themes not for news/superevent — у них пока только TFR
     "light": {"country", "region", "battle", "person"},
     "dark": {"country", "region", "battle", "person"},
     "aurelia": {"country", "region", "battle", "person"},

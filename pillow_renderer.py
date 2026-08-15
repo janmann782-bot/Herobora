@@ -816,6 +816,168 @@ def _render_news_tfr(
     return output
 
 
+def _render_superevent_tfr(
+    page: Page,
+    work_dir: Path,
+    output: Path,
+) -> Path:
+    """Superevent card in THE FIRE RISES style: frame + additive pink-blue gradient."""
+    here = Path(__file__).resolve().parent
+    frame_path = here / "tfr_se_frame.png"
+    grad_path = here / "tfr_se_grad.png"
+    if not frame_path.exists() or not grad_path.exists():
+        raise FileNotFoundError("не нашёл tfr_se_frame.png / tfr_se_grad.png рядом с ботом")
+
+    frame = Image.open(frame_path).convert("RGBA")
+    grad = Image.open(grad_path).convert("RGBA")
+    fw, fh = frame.size
+    if grad.size != (fw, fh):
+        grad = grad.resize((fw, fh), Image.Resampling.LANCZOS)
+
+    # text regions measured on 2048x1536 template
+    TITLE_Y0, TITLE_Y1 = 155, 230
+    BODY_BOX = (430, 990, 1620, 1145)  # x0,y0,x1,y1
+    BTN_BOX = (780, 1295, 1268, 1355)
+    # main image area inside the frame
+    IMG_BOX = (80, 260, 1968, 960)
+
+    d = page.data
+    title = str(d.get("title") or page.title or "Без названия").strip()
+    body = str(d.get("body") or d.get("description") or "").strip()
+    button = str(d.get("button_text") or "").strip()
+
+    canvas = Image.new("RGBA", (fw, fh), (0, 0, 0, 255))
+
+    # user image under the gradient
+    images = page_images(d)
+    if images:
+        media = _media_path(images[0], work_dir)
+        if media is None:
+            cand = Path(str(images[0]))
+            if cand.is_file():
+                media = cand
+        if media is not None:
+            try:
+                src = ImageOps.exif_transpose(Image.open(media))
+                src.load()
+                src = src.convert("RGB")
+                box_w = IMG_BOX[2] - IMG_BOX[0]
+                box_h = IMG_BOX[3] - IMG_BOX[1]
+                fitted = ImageOps.fit(src, (box_w, box_h), Image.Resampling.LANCZOS)
+                canvas.paste(fitted, (IMG_BOX[0], IMG_BOX[1]))
+            except Exception:
+                pass
+
+    # additive blend of pink-blue gradient over everything so far
+    base = canvas.convert("RGB")
+    g_rgb = grad.convert("RGB")
+    g_a = grad.split()[-1]
+    # result = min(255, base + grad * alpha)
+    import numpy as np
+
+    b = np.asarray(base, dtype=np.float32)
+    g = np.asarray(g_rgb, dtype=np.float32)
+    a = np.asarray(g_a, dtype=np.float32) / 255.0
+    added = np.clip(b + g * a[:, :, None], 0, 255).astype(np.uint8)
+    canvas = Image.fromarray(added, "RGB").convert("RGBA")
+
+    # metal frame on top
+    canvas = Image.alpha_composite(canvas, frame)
+    draw = ImageDraw.Draw(canvas)
+
+    def load_font(name: str, size: int):
+        p = here / name
+        try:
+            return ImageFont.truetype(str(p), size)
+        except Exception:
+            return ImageFont.load_default()
+
+    title_font = load_font("PixeloidSans.otf", 36)
+    body_font = load_font("PixeloidSans.otf", 28)
+    btn_font = load_font("PixeloidSans.otf", 26)
+
+    def wrap(text: str, font, max_w: int) -> list[str]:
+        lines: list[str] = []
+        for para in (text.splitlines() or [text]):
+            para = para.strip()
+            if not para:
+                lines.append("")
+                continue
+            words = para.split()
+            cur = ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                try:
+                    tw = draw.textlength(test, font=font)
+                except Exception:
+                    tw = len(test) * 14
+                if tw <= max_w or not cur:
+                    cur = test
+                else:
+                    lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+        return lines or [""]
+
+    # title centered in top bar (drawn AFTER gradient so it stays clean)
+    max_tw = 1600
+    t_lines = wrap(title, title_font, max_tw)[:2]
+    try:
+        lh = title_font.getbbox("Ag")[3] - title_font.getbbox("Ag")[1] + 6
+    except Exception:
+        lh = 40
+    total_h = lh * len(t_lines)
+    ty = TITLE_Y0 + max(0, (TITLE_Y1 - TITLE_Y0 - total_h) // 2)
+    for line in t_lines:
+        try:
+            tw = int(draw.textlength(line, font=title_font))
+        except Exception:
+            tw = len(line) * 18
+        tx = (fw - tw) // 2
+        draw.text((tx, ty), line, font=title_font, fill=(230, 230, 235, 255))
+        ty += lh
+
+    # body text in the lower panel
+    if body:
+        bx0, by0, bx1, by1 = BODY_BOX
+        max_bw = bx1 - bx0
+        b_lines = wrap(body, body_font, max_bw)
+        try:
+            blh = body_font.getbbox("Ag")[3] - body_font.getbbox("Ag")[1] + 8
+        except Exception:
+            blh = 34
+        max_rows = max(1, (by1 - by0) // blh)
+        b_lines = b_lines[:max_rows]
+        total_h = blh * len(b_lines)
+        by = by0 + max(0, (by1 - by0 - total_h) // 2)
+        for line in b_lines:
+            try:
+                tw = int(draw.textlength(line, font=body_font))
+            except Exception:
+                tw = len(line) * 14
+            tx = bx0 + (max_bw - tw) // 2
+            draw.text((tx, by), line, font=body_font, fill=(245, 245, 250, 255))
+            by += blh
+
+    # button label
+    if button:
+        bx0, by0, bx1, by1 = BTN_BOX
+        try:
+            tw = int(draw.textlength(button, font=btn_font))
+            th = btn_font.getbbox("Ag")[3] - btn_font.getbbox("Ag")[1]
+        except Exception:
+            tw, th = len(button) * 12, 24
+        btx = bx0 + (bx1 - bx0 - tw) // 2
+        bty = by0 + (by1 - by0 - th) // 2 - 2
+        draw.text((btx + 1, bty + 1), button, font=btn_font, fill=(0, 0, 0, 160))
+        draw.text((btx, bty), button, font=btn_font, fill=(235, 235, 240, 255))
+
+    out = canvas.convert("RGB")
+    out.save(output, "PNG", compress_level=6)
+    return output
+
+
 def render_pillow(
     page: Page,
     work_dir: str | Path,
@@ -833,6 +995,8 @@ def render_pillow(
 
     if page.type == "news":
         return _render_news_tfr(page, root, path)
+    if page.type == "superevent":
+        return _render_superevent_tfr(page, root, path)
 
     theme = get_theme(page.theme)
     tpl = get_template(page.type)

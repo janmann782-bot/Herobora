@@ -462,7 +462,7 @@ async def render_page(
         await asyncio.to_thread(render_olddoc, page, root, quality, path, watermark)
         return path
 
-    if page.type == "news":
+    if page.type in ("news", "superevent"):
         from pillow_renderer import render_pillow
 
         await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
