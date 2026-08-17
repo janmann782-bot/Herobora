@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
+from log_sink import spawn_created_page_log, spawn_export, spawn_page_deleted
 from media import (
     MAX_PAGE_IMAGES,
     BadImage,
@@ -88,6 +89,13 @@ async def render_saved(
             )
             p.preview_path = path.name
             await db.update_page(p)
+            # лог каждого реального рендера сохранённой страницы
+            try:
+                spawn_created_page_log(
+                    msg.bot, cfg, db, p, msg.from_user, preview_path=path, stage="render"
+                )
+            except Exception:
+                pass
         except Exception as e:
             log.exception("saved page render failed: page=%s user=%s", p.id, p.owner_id)
             await msg.answer(tr("render_error", error=render_error_text(e)))
@@ -637,6 +645,7 @@ async def export_page(q: CallbackQuery, db: Db, cfg: Config) -> None:
     page_id = int(q.data.rsplit(":", 1)[1])
     p = await get_owned(q, db, page_id)
     if p:
+        spawn_export(q.bot, cfg, q.from_user, p)
         await render_saved(q.message, p, db, cfg, document=True)
 
 
@@ -658,6 +667,7 @@ async def delete_page(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) 
         return
     ok = await db.delete_page(page_id, q.from_user.id)
     if ok:
+        spawn_page_deleted(q.bot, cfg, q.from_user, p)
         safe_unlink(p.preview_path, cfg.work_dir, "preview_")
         for path in page_images(p.data):
             if await db.drop_media_if_unused(path, q.from_user.id):

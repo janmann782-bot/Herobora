@@ -51,9 +51,15 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 
 def types_kb() -> InlineKeyboardMarkup:
-    rows = []
+    ordinary = []
+    tfr = []
     for x in TEMPLATES.values():
-        rows.append([ib(f"{x.emoji} {x.label}", f"new:{x.key}")])
+        btn = ib(f"{x.emoji} {x.label}", f"new:{x.key}")
+        if x.key in TFR_SIMPLE_TYPES:
+            tfr.append([btn])
+        else:
+            ordinary.append([btn])
+    rows = ordinary + tfr
     rows.append([ib("❌ Отмена", "flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -416,7 +422,7 @@ async def send_png(
         )
 
 
-DIV = "▬▬ι══════════════ι▬▬"
+DIV = "---------------"
 
 
 def box(text: str) -> str:
@@ -445,8 +451,8 @@ async def flow_show(
 ):
     """Обновляет одно сообщение мастера вместо спама новыми.
 
-    target — Message или CallbackQuery.
-    state  — FSMContext.
+    target - Message или CallbackQuery.
+    state  - FSMContext.
     """
     from aiogram.types import CallbackQuery, Message
 
@@ -466,7 +472,7 @@ async def flow_show(
             if msg.message_id == mid and msg.text is not None:
                 await msg.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
                 return msg
-            # другое сообщение — edit по id
+            # другое сообщение - edit по id
             bot = msg.bot
             await bot.edit_message_text(
                 text,

@@ -1,4 +1,4 @@
-"""Hidden admin tools — not listed in BotFather / set_my_commands menu."""
+"""Hidden admin tools - not listed in BotFather / set_my_commands menu."""
 from __future__ import annotations
 
 import logging
@@ -80,10 +80,10 @@ def maintenance_text() -> str:
 async def admin_help(msg: Message) -> None:
     await msg.answer(
         "Админ команды (скрыты из меню)\n\n"
-        "/maint — статус техработ\n"
-        "/maint_on — включить техработы\n"
-        "/maint_off — выключить\n"
-        "/admin — эта справка"
+        "/maint - статус техработ\n"
+        "/maint_on - включить техработы\n"
+        "/maint_off - выключить\n"
+        "/admin - эта справка"
     )
 
 
@@ -105,6 +105,10 @@ async def maint_off(msg: Message, cfg: Config) -> None:
     set_maintenance(cfg, False)
     log.warning("Maintenance OFF by admin %s", msg.from_user.id if msg.from_user else "?")
     await msg.answer("Техработы выключены\nБот снова для всех")
+
+
+
+
 
 
 async def maintenance_middleware(handler, event, data):

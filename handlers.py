@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ErrorEvent, Message
@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, ErrorEvent, Message
 from config import Config
 from db import Db
 from locales import tr
+from log_sink import spawn_user_start
 from media import safe_unlink
 from states import clear_flow
 from stats import format_count
@@ -52,13 +53,14 @@ async def show_settings(msg: Message, db: Db, user_id: int) -> None:
 
 
 @router.message(CommandStart())
-async def start(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+async def start(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
     await clear_flow(state, msg.from_user.id, db, cfg)
     await db.touch_user(
         msg.from_user.id,
         msg.from_user.first_name or "",
         msg.from_user.username or "",
     )
+    spawn_user_start(bot, cfg, msg.from_user)
     await msg.answer(tr("welcome"), reply_markup=main_menu(), parse_mode="HTML")
 
 

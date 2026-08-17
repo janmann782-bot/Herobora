@@ -14,7 +14,14 @@ from aiogram.types import CallbackQuery, Message
 from config import Config
 from db import Db
 from locales import tr
-from log_sink import send_created_page_log
+from log_sink import (
+    send_created_page_log,
+    spawn_cancel,
+    spawn_create_started,
+    spawn_export,
+    spawn_page_saved,
+    spawn_render_error,
+)
 from media import (
     MAX_PAGE_IMAGES,
     BadImage,
@@ -77,12 +84,12 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         if ptype in ("news", "superevent"):
             label = "суперевенту" if ptype == "superevent" else "новости"
             text = (
-                f"▬▬ι══════════════ι▬▬\n"
+                f"---------------\n"
                 f"<b>Картинка</b>\n"
                 f"Кинь одну к {label}\n"
                 f"PNG JPEG WEBP до {d.get('max_image_mb', 12)} МБ\n"
                 f"Сейчас: {count}/{max_count}\n"
-                f"▬▬ι══════════════ι▬▬"
+                f"---------------"
             )
         else:
             text = tr(
@@ -100,7 +107,7 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
     s = tr("field_prompt", label=f.label, hint=hint, step=i + 1, total=len(tpl.wizard))
     current = (d.get("page_data") or {}).get(f.key)
     if current:
-        # value в current_value уже в blockquote — экранируем HTML
+        # value в current_value уже в blockquote - экранируем HTML
         from html import escape
         s += "\n\n" + tr("current_value", value=escape(str(current)[:500]))
     await state.set_state(NewPage.field)
@@ -169,19 +176,15 @@ async def show_preview(
             draft_kb(p.type, p.theme),
         )
 
-        # В лог-группу отправляем именно в момент первого реального рендера
-        # карточки, а не при сохранении страницы. Повторные предпросмотры
-        # этого же черновика лог не засоряют.
-        if not d.get("creation_log_sent"):
-            sent = await send_created_page_log(
-                bot, cfg, db, p, user, preview_path=path, stage="render"
-            )
-            if sent:
-                await state.update_data(creation_log_sent=True)
+        # каждый успешный рендер - в лог-группу
+        from log_sink import spawn_created_page_log
+        spawn_created_page_log(bot, cfg, db, p, user, preview_path=path, stage="render")
         return p
     except Exception as e:
         log.exception("draft render failed for user %s", user_id)
-        await msg.answer(tr("render_error", error=render_error_text(e)), reply_markup=draft_kb((d.get("type") or ""), d.get("theme", "")))
+        err = render_error_text(e)
+        spawn_render_error(bot, cfg, user, d.get("type") or "", err)
+        await msg.answer(tr("render_error", error=err), reply_markup=draft_kb((d.get("type") or ""), d.get("theme", "")))
         return None
     finally:
         with suppress(TelegramBadRequest):
@@ -207,7 +210,7 @@ async def show_quick(msg: Message, state: FSMContext) -> None:
     await msg.answer(d.get("quick_text", tr("draft_missing")), reply_markup=quick_kb())
 
 
-async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, user_id: int, kind: str) -> None:
+async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, user_id: int, kind: str, user=None) -> None:
     try:
         get_template(kind)
     except ValueError:
@@ -232,20 +235,27 @@ async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, u
         flow_chat_id=flow_cid,
     )
     await state.set_state(NewPage.field)
+    if user is not None:
+        spawn_create_started(msg.bot, cfg, user, kind)
     await ask_field(msg, state)
 
 
 @router.callback_query(F.data.startswith("new:"))
 async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
-    await q.answer()
     kind = q.data.split(":", 1)[1]
-    await begin_new_page(q.message, state, db, cfg, q.from_user.id, kind)
+    try:
+        label = get_template(kind).label
+    except ValueError:
+        await q.answer()
+        return
+    await q.answer(label)
+    await begin_new_page(q.message, state, db, cfg, q.from_user.id, kind, user=q.from_user)
 
 
 @router.message(NewPage.field)
 async def take_field(msg: Message, state: FSMContext) -> None:
     if not msg.text:
-        await msg.answer(tr("text_only"))
+        await flow_show(msg, state, tr("text_only"), wizard_kb())
         return
 
     d = await state.get_data()
@@ -261,10 +271,11 @@ async def take_field(msg: Message, state: FSMContext) -> None:
     if f.key == "title":
         limit = 250
     if not s:
-        await msg.answer(tr("title_required") if f.key == "title" else tr("empty_value"))
+        text = tr("title_required") if f.key == "title" else tr("empty_value")
+        await flow_show(msg, state, text, wizard_kb(can_skip=f.key != "title"))
         return
     if len(s) > limit:
-        await msg.answer(tr("too_long", limit=limit))
+        await flow_show(msg, state, tr("too_long", limit=limit), wizard_kb(can_skip=f.key != "title"))
         return
 
     data = d.get("page_data") or {}
@@ -305,8 +316,22 @@ async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot:
     if d.get("image_mode") == "draft":
         await show_preview(msg, state, db, cfg, bot, user)
         return
+    ptype = d.get("type") or ""
+    # если для типа одна тема - не спрашиваем, сразу превью
+    from themes import THEMES, theme_allowed
+    allowed = [k for k in THEMES if theme_allowed(k, ptype)]
+    if len(allowed) <= 1:
+        theme = allowed[0] if allowed else d.get("theme") or "light"
+        await state.update_data(theme=theme)
+        await show_preview(msg, state, db, cfg, bot, user)
+        return
     await state.set_state(NewPage.theme)
-    await msg.answer(tr("choose_theme"), reply_markup=themes_kb("dt", d.get("theme", "light"), d.get("type", "")), parse_mode="HTML")
+    await flow_show(
+        msg,
+        state,
+        tr("choose_theme"),
+        themes_kb("dt", d.get("theme", "light"), ptype),
+    )
 
 
 @router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
@@ -411,7 +436,7 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         return
 
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
-    # news — только одна картинка, старую выкидываем
+    # news - только одна картинка, старую выкидываем
     if ptype in ("news", "superevent"):
         images = [info.path.name]
     else:
@@ -421,9 +446,11 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
 
     if ptype in ("news", "superevent"):
         await state.update_data(caption_path=None, caption_i=None)
-        await msg.answer(
-            f"Картинку поставил {len(images)}/{max_count}\nМожешь нажать Готово",
-            reply_markup=image_kb(len(images), ptype),
+        await flow_show(
+            msg,
+            state,
+            f"---------------\nКартинка стоит {len(images)}/{max_count}\nЖми Готово или кинь другую - заменю\n---------------",
+            image_kb(len(images), ptype),
         )
         return
 
@@ -778,8 +805,9 @@ async def save_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -
     p = await db.save_page(p)
     for path in page_images(p.data):
         await db.attach_media(path, p.id, q.from_user.id)
+    spawn_page_saved(q.bot, cfg, q.from_user, p)
     await state.clear()
-    await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id, p.type, p.theme))
+    await q.message.answer(tr("saved", title=p.title), reply_markup=page_actions_kb(p.id, p.type, p.theme), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "draft:text")
@@ -811,6 +839,7 @@ async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config,
         path = (cfg.work_dir / d["preview_path"]).resolve()
 
     p = make_draft(await state.get_data(), q.from_user.id)
+    spawn_export(bot, cfg, q.from_user, p)
     await send_png(q.message, path, p.title, document=True)
 
 
@@ -818,6 +847,7 @@ async def export_draft(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config,
 async def cancel_flow(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
     await q.answer()
     await clear_flow(state, q.from_user.id, db, cfg)
+    spawn_cancel(q.bot, cfg, q.from_user)
     await q.message.answer(tr("cancelled"), reply_markup=main_menu())
 
 
