@@ -31,7 +31,7 @@ SUPEREVENT = "‼️ Суперевент (БЕТА)"
 T = TypeVar("T")
 
 # типы с одной картинкой без своих полей
-TFR_SIMPLE_TYPES = frozenset({"news", "superevent"})
+TFR_SIMPLE_TYPES = frozenset({"news", "superevent", "mirotorets"})
 SPECIAL_TYPES = frozenset({"news", "superevent", "mirotorets"})
 
 

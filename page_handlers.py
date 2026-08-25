@@ -314,8 +314,8 @@ async def page_add(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> 
         await state.set_state(EditPage.image)
         tpl = get_template(p.type)
         count = len(page_images(p.data))
-        max_c = 1 if p.type in ("news", "superevent") else MAX_PAGE_IMAGES
-        if p.type in ("news", "superevent"):
+        max_c = 1 if p.type in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
+        if p.type in ("news", "superevent", "mirotorets"):
             text = (
                 f"Кинь одну картинку к новости\n"
                 f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n\n"
@@ -395,8 +395,8 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         await msg.answer(tr("page_not_found"))
         return
     images = page_images(p.data)
-    max_c = 1 if p.type in ("news", "superevent") else MAX_PAGE_IMAGES
-    if len(images) >= max_c and p.type not in ("news", "superevent"):
+    max_c = 1 if p.type in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
+    if len(images) >= max_c and p.type not in ("news", "superevent", "mirotorets"):
         await msg.answer(
             tr("image_limit", max_count=max_c),
             reply_markup=page_image_kb(p.id, len(images), p.type),
@@ -433,7 +433,7 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         )
         return
 
-    if p.type in ("news", "superevent"):
+    if p.type in ("news", "superevent", "mirotorets"):
         images = [info.path.name]
     else:
         images.append(info.path.name)
@@ -442,7 +442,7 @@ async def page_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     p.preview_path = None
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height, p.id)
     await db.update_page(p)
-    if p.type in ("news", "superevent"):
+    if p.type in ("news", "superevent", "mirotorets"):
         await msg.answer(
             f"Картинку поставил {len(images)}/1\nМожешь нажать Готово",
             reply_markup=page_image_kb(p.id, len(images), p.type),
@@ -481,7 +481,7 @@ async def page_image_action(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
         await render_saved(q.message, p, db, cfg)
         return
     if action == "cap" and len(parts) == 4:
-        if p.type in ("news", "superevent"):
+        if p.type in ("news", "superevent", "mirotorets"):
             return
         i = int(parts[3])
         if not 0 <= i < len(images):
