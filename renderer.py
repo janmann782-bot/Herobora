@@ -398,13 +398,15 @@ def make_mirotorets_html(
     tags = [t for t in hashtags.split() if t.startswith("#")]
     tags_html = "".join(f'<div class="tag">{esc(t)}</div>' for t in tags)
 
-    # одно фото слева или N/D
-    photo_html = '<div class="nd">N/D</div>'
-    imgs = page_images(d)
-    if imgs:
-        uri = image_uri(imgs[0], work_dir)
-        if uri:
-            photo_html = f'<img class="photo" src="{uri}" alt="">'
+    # SVG наручники (без emoji)
+    cuffs_svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="88" height="74">
+  <g fill="none" stroke="#111" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="62" r="22"/>
+    <circle cx="88" cy="62" r="22"/>
+    <path d="M50 48 C58 28 72 28 80 48"/>
+    <circle cx="60" cy="36" r="5" fill="#111" stroke="none"/>
+  </g>
+</svg>"""
 
     return f"""<!doctype html>
 <html lang="ru">
@@ -444,30 +446,8 @@ body {{ padding: 16px; }}
   align-items: center;
   justify-content: center;
   border-right: 1px solid #c5cdd8;
-  padding: 8px;
+  padding: 14px 10px;
   background: #fff;
-  min-height: 110px;
-}}
-.icon-box .photo {{
-  display: block;
-  width: 100%;
-  height: 110px;
-  object-fit: cover;
-  border: 1px solid #c5cdd8;
-  background: #f0f0f0;
-}}
-.icon-box .nd {{
-  width: 100%;
-  height: 110px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #c5cdd8;
-  background: #f7f8fa;
-  color: #666;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
 }}
 .meta-box {{
   flex: 1;
@@ -522,7 +502,7 @@ body {{ padding: 16px; }}
 <article class="card" id="infobox">
   <div class="header"></div>
   <div class="top-row">
-    <div class="icon-box">{photo_html}</div>
+    <div class="icon-box">{cuffs_svg}</div>
     <div class="meta-box">
       {"".join(top_meta)}
       <div class="dash"></div>

@@ -80,19 +80,14 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         await state.update_data(image_mode="initial")
         count = len(page_images(d.get("page_data") or {}))
         ptype = d.get("type") or ""
-        max_count = 1 if ptype in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
-        if ptype in ("news", "superevent", "mirotorets"):
-            if ptype == "superevent":
-                label = "суперевенту"
-            elif ptype == "mirotorets":
-                label = "миротворцу"
-            else:
-                label = "новости"
+        max_count = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
+        if ptype in ("news", "superevent"):
+            label = "суперевенту" if ptype == "superevent" else "новости"
             text = (
                 f"▬▬ι══════════════ι▬▬\n"
                 f"Картинка\n"
                 f"▬▬ι══════════════ι▬▬\n"
-                f"Кинь одно фото к {label} (или без фото - N/D)\n"
+                f"Кинь одну к {label}\n"
                 f"PNG JPEG WEBP до {d.get('max_image_mb', 12)} МБ\n"
                 f"Сейчас: {count}/{max_count}"
             )
@@ -409,9 +404,9 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
     data = d.get("page_data") or {}
     images = page_images(data)
     ptype = d.get("type") or ""
-    max_count = 1 if ptype in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
+    max_count = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
     # для news/superevent при новой фотке просто заменяем, не блокируем
-    if len(images) >= max_count and ptype not in ("news", "superevent", "mirotorets"):
+    if len(images) >= max_count and ptype not in ("news", "superevent"):
         await msg.answer(
             tr("image_limit", max_count=max_count),
             reply_markup=image_kb(len(images), ptype),
@@ -448,14 +443,14 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
 
     await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
     # news - только одна картинка, старую выкидываем
-    if ptype in ("news", "superevent", "mirotorets"):
+    if ptype in ("news", "superevent"):
         images = [info.path.name]
     else:
         images.append(info.path.name)
     set_page_images(data, images)
     await state.update_data(page_data=data)
 
-    if ptype in ("news", "superevent", "mirotorets"):
+    if ptype in ("news", "superevent"):
         await state.update_data(caption_path=None, caption_i=None)
         await flow_show(
             msg,
@@ -547,7 +542,7 @@ async def draft_theme(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, 
             tpl = get_template(d["type"])
             ptype = d.get("type") or ""
             cnt = len(page_images(d.get("page_data") or {}))
-            max_c = 1 if ptype in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
+            max_c = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
             await q.message.answer(
                 tr(
                     "send_image",
@@ -701,7 +696,7 @@ async def add_draft_custom(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    if d.get("type") in ("news", "superevent", "mirotorets"):
+    if d.get("type") in ("news", "superevent"):
         await q.message.answer("Тут свои поля не нужны")
         return
     if len((d.get("page_data") or {}).get("custom_fields") or []) >= 20:
@@ -743,7 +738,7 @@ async def add_draft_section(q: CallbackQuery, state: FSMContext) -> None:
     if not d.get("type"):
         await q.message.answer(tr("draft_missing"))
         return
-    if d.get("type") in ("news", "superevent", "mirotorets"):
+    if d.get("type") in ("news", "superevent"):
         await q.message.answer("Тут свои разделы не нужны")
         return
     if len((d.get("page_data") or {}).get("sections") or []) >= 6:
@@ -781,21 +776,16 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
     tpl = get_template(d["type"])
     ptype = d.get("type") or ""
     count = len(page_images(d.get("page_data") or {}))
-    max_c = 1 if ptype in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
+    max_c = 1 if ptype in ("news", "superevent") else MAX_PAGE_IMAGES
     await state.update_data(image_mode="draft")
     await state.set_state(NewPage.image)
-    if ptype in ("news", "superevent", "mirotorets"):
-        if ptype == "superevent":
-            label = "суперевенту"
-        elif ptype == "mirotorets":
-            label = "миротворцу"
-        else:
-            label = "новости"
+    if ptype in ("news", "superevent"):
+        label = "суперевенту" if ptype == "superevent" else "новости"
         text = (
             f"▬▬ι══════════════ι▬▬\n"
             f"Картинка\n"
             f"▬▬ι══════════════ι▬▬\n"
-            f"Кинь одно фото к {label} (или без фото - N/D)\n"
+            f"Кинь одну к {label}\n"
             f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n"
             f"Сейчас: {count}/{max_c}"
         )
