@@ -192,7 +192,31 @@ SUPEREVENT = Template(
 )
 
 
-TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON, NEWS, SUPEREVENT)}
+MIROTORETS = Template(
+    key="mirotorets",
+    label="Миротворец",
+    emoji="🔗",
+    image_label="фото или иконка (опционально)",
+    subtitle_key=None,
+    wizard=("title", "birth_date", "country", "rank", "unit", "description"),
+    fields=(
+        f("title", "Имя / ФИО", "Основные сведения"),
+        f("birth_date", "Дата рождения", "Основные сведения"),
+        f("country", "Страна", "Основные сведения"),
+        f("rank", "Звание", "Военные данные"),
+        f("unit", "Подразделение", "Военные данные"),
+        f("position", "Должность", "Военные данные"),
+        f("personal_number", "Личный номер", "Военные данные"),
+        f("passport", "Паспорт", "Военные данные"),
+        f("birth_place", "Место рождения", "Военные данные"),
+        f("description", "Описание / обвинение", "Текст карточки", multiline=True),
+        f("hashtags", "Хэштеги", "Текст карточки"),
+        f("footer", "Текст внизу (красный)", "Текст карточки", multiline=True),
+    ),
+)
+
+
+TEMPLATES = {x.key: x for x in (COUNTRY, REGION, BATTLE, PERSON, NEWS, SUPEREVENT, MIROTORETS)}
 
 
 def get_template(key: str) -> Template:

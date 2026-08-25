@@ -84,12 +84,12 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         if ptype in ("news", "superevent"):
             label = "суперевенту" if ptype == "superevent" else "новости"
             text = (
-                f"---------------\n"
-                f"<b>Картинка</b>\n"
+                f"▬▬ι══════════════ι▬▬\n"
+                f"Картинка\n"
+                f"▬▬ι══════════════ι▬▬\n"
                 f"Кинь одну к {label}\n"
                 f"PNG JPEG WEBP до {d.get('max_image_mb', 12)} МБ\n"
-                f"Сейчас: {count}/{max_count}\n"
-                f"---------------"
+                f"Сейчас: {count}/{max_count}"
             )
         else:
             text = tr(
@@ -221,7 +221,13 @@ async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, u
     flow_mid = prev.get("flow_message_id") or (msg.message_id if msg else None)
     flow_cid = prev.get("flow_chat_id") or (msg.chat.id if msg else None)
     await clear_flow(state, user_id, db, cfg)
-    theme = "fire_rises" if kind in ("news", "superevent") else s.theme
+    if kind in ("news", "superevent"):
+        theme = "fire_rises"
+    elif kind == "mirotorets":
+        theme = "mirotorets"
+    else:
+        # всем обычным - старый документ по умолчанию (кроме news/se/mirotorets)
+        theme = "olddoc"
     await state.update_data(
         type=kind,
         page_data={},
@@ -449,7 +455,7 @@ async def take_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Con
         await flow_show(
             msg,
             state,
-            f"---------------\nКартинка стоит {len(images)}/{max_count}\nЖми Готово или кинь другую - заменю\n---------------",
+            f"▬▬ι══════════════ι▬▬\nКартинка стоит {len(images)}/{max_count}\n▬▬ι══════════════ι▬▬\nЖми Готово или кинь другую - заменю",
             image_kb(len(images), ptype),
         )
         return
@@ -776,8 +782,11 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
     if ptype in ("news", "superevent"):
         label = "суперевенту" if ptype == "superevent" else "новости"
         text = (
-            f"Кинь одну картинку к {label}\n"
-            f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n\n"
+            f"▬▬ι══════════════ι▬▬\n"
+            f"Картинка\n"
+            f"▬▬ι══════════════ι▬▬\n"
+            f"Кинь одну к {label}\n"
+            f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n"
             f"Сейчас: {count}/{max_c}"
         )
     else:

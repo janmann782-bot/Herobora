@@ -153,13 +153,36 @@ FIRE_RISES = Theme(
 )
 
 
-THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC, FIRE_RISES)}
+MIROTORETS = Theme(
+    key="mirotorets",
+    name="Миротворец",
+    background="#ffffff",
+    panel="#ffffff",
+    panel_alt="#f5f5f5",
+    text="#1a1a1a",
+    text_secondary="#555555",
+    accent="#0066cc",
+    border="#cccccc",
+    section_bg="#e8f0fe",
+    section_text="#1a1a1a",
+    link="#0066cc",
+    font="'DejaVu Sans', Arial, Helvetica, sans-serif",
+    heading_font="'DejaVu Sans', Arial, Helvetica, sans-serif",
+    border_width=1,
+    radius=4,
+    pixel_border=False,
+    image_border="#cccccc",
+)
+
+
+THEMES = {x.key: x for x in (LIGHT, DARK, AURELIA, OLDDOC, FIRE_RISES, MIROTORETS)}
 
 # Theme available only for these page types (missing key = all types)
 THEME_PAGE_TYPES: dict[str, set[str] | None] = {
-    "olddoc": {"country"},
+    "olddoc": {"country", "region", "battle", "person"},
     "fire_rises": {"news", "superevent"},
-    # ordinary themes not for news/superevent — у них пока только TFR
+    "mirotorets": {"mirotorets"},
+    # ordinary themes not for news/superevent/mirotorets
     "light": {"country", "region", "battle", "person"},
     "dark": {"country", "region", "battle", "person"},
     "aurelia": {"country", "region", "battle", "person"},

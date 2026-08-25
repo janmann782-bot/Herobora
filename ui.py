@@ -32,6 +32,7 @@ T = TypeVar("T")
 
 # типы с одной картинкой без своих полей
 TFR_SIMPLE_TYPES = frozenset({"news", "superevent"})
+SPECIAL_TYPES = frozenset({"news", "superevent", "mirotorets"})
 
 
 def ib(text: str, data: str, **_kwargs) -> InlineKeyboardButton:
@@ -52,14 +53,14 @@ def main_menu() -> ReplyKeyboardMarkup:
 
 def types_kb() -> InlineKeyboardMarkup:
     ordinary = []
-    tfr = []
+    special = []
     for x in TEMPLATES.values():
         btn = ib(f"{x.emoji} {x.label}", f"new:{x.key}")
-        if x.key in TFR_SIMPLE_TYPES:
-            tfr.append([btn])
+        if x.key in SPECIAL_TYPES:
+            special.append([btn])
         else:
             ordinary.append([btn])
-    rows = ordinary + tfr
+    rows = ordinary + special
     rows.append([ib("❌ Отмена", "flow:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -204,7 +205,7 @@ def draft_kb(page_type: str | None = None, theme: str = "") -> InlineKeyboardMar
         rows.append([ib("🎨 Сменить тему", "draft:theme"), ib("🖼 Изображения", "draft:image")])
     if page_type == "battle":
         rows.append([ib("⚔️ Редактор сторон", "draft:sides")])
-    if theme == "olddoc" and page_type == "country":
+    if theme == "olddoc" and page_type in ("country", "region", "battle", "person"):
         rows.append([ib("📜 Варианты документа", "draft:olddoc")])
     if page_type not in TFR_SIMPLE_TYPES:
         rows.append([ib("➕ Свое поле", "draft:custom"), ib("🧩 Свой раздел", "draft:section")])
@@ -285,7 +286,7 @@ def page_actions_kb(page_id: int, page_type: str | None = None, theme: str = "")
     ]
     if page_type == "battle":
         rows.append([ib("⚔️ Редактор сторон", f"p:bs:{page_id}")])
-    if theme == "olddoc" and page_type == "country":
+    if theme == "olddoc" and page_type in ("country", "region", "battle", "person"):
         rows.append([ib("📜 Варианты документа", f"p:old:{page_id}")])
     rows += [
         [ib("📤 Экспорт", f"p:x:{page_id}"), ib("📋 Выслать текстом", f"p:txt:{page_id}")],
@@ -449,7 +450,7 @@ async def flow_show(
     *,
     as_new: bool = False,
 ):
-    """Обновляет одно сообщение мастера вместо спама новыми.
+    """Удаляет предыдущее сообщение мастера и пишет новое с следующим шагом.
 
     target - Message или CallbackQuery.
     state  - FSMContext.
@@ -466,28 +467,13 @@ async def flow_show(
     mid = d.get("flow_message_id")
     chat_id = d.get("flow_chat_id")
 
-    # пробуем edit существующего
-    if not as_new and msg is not None and mid and chat_id:
-        try:
-            if msg.message_id == mid and msg.text is not None:
-                await msg.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
-                return msg
-            # другое сообщение - edit по id
+    # удаляем старое сообщение мастера
+    if not as_new and mid and chat_id and msg is not None:
+        with suppress(Exception):
             bot = msg.bot
-            await bot.edit_message_text(
-                text,
-                chat_id=chat_id,
-                message_id=mid,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
-            )
-            return msg
-        except TelegramBadRequest:
-            pass
-        except Exception:
-            pass
+            await bot.delete_message(chat_id=chat_id, message_id=mid)
 
-    # fallback: новое сообщение
+    # всегда новое сообщение
     if isinstance(target, CallbackQuery):
         sent = await target.message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
     else:

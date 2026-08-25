@@ -307,12 +307,119 @@ def stripe_rows(body: str) -> str:
         out.append(f'<div class="{cls}">' + part)
     return ''.join(out)
 
+def make_mirotorets_html(
+    page: Page,
+    theme: Theme,
+    work_dir: str | Path = ".",
+    watermark: bool = False,
+) -> str:
+    """Карточка в стиле Миротворца без водяных знаков."""
+    d = page.data
+    title = str(d.get("title") or page.title or "Без имени").strip()
+    birth = str(d.get("birth_date") or "").strip()
+    country = str(d.get("country") or "Россия").strip()
+    rank = str(d.get("rank") or "").strip()
+    unit = str(d.get("unit") or "").strip()
+    position = str(d.get("position") or "").strip()
+    personal = str(d.get("personal_number") or "").strip()
+    passport = str(d.get("passport") or "").strip()
+    birth_place = str(d.get("birth_place") or "").strip()
+    desc = str(d.get("description") or "Российский военный преступник.\nУчастник нападения фашистской россии на Украину 24.02.2022.\nВ/служащий вооруженных сил российской федерации.").strip()
+    hashtags = str(d.get("hashtags") or "#StopRussianAggression").strip()
+    footer_text = str(d.get("footer") or "Центр «Миротворец» просит правоохранительные органы рассматривать данную публикацию на сайте как заявление о совершении этим гражданином осознанных деяний против национальной безопасности Украины, мира, безопасности человечества и международного правопорядка, а также иных правонарушений.").strip()
+
+    rows = []
+    if birth:
+        rows.append(f'<div class="m-row"><span class="m-lab">Дата рождения:</span> <span class="m-val">{esc(birth)}</span></div>')
+    if country:
+        rows.append(f'<div class="m-row"><span class="m-lab">Страна:</span> <span class="m-val">{esc(country)}</span></div>')
+    if unit:
+        rows.append(f'<div class="m-row"><span class="m-lab">Подразделение:</span> <span class="m-val">{esc(unit)}</span></div>')
+    if position:
+        rows.append(f'<div class="m-row"><span class="m-lab">Должность:</span> <span class="m-val">{esc(position)}</span></div>')
+    if rank:
+        rows.append(f'<div class="m-row"><span class="m-lab">Звание:</span> <span class="m-val">{esc(rank)}</span></div>')
+    if personal:
+        rows.append(f'<div class="m-row"><span class="m-lab">Личный номер:</span> <span class="m-val">{esc(personal)}</span></div>')
+    if passport:
+        rows.append(f'<div class="m-row"><span class="m-lab">Паспорт:</span> <span class="m-val">{esc(passport)}</span></div>')
+    if birth_place:
+        rows.append(f'<div class="m-row"><span class="m-lab">Место рождения:</span> <span class="m-val">{esc(birth_place)}</span></div>')
+
+    desc_html = value_html(desc).replace("\n", "<br>")
+    tags_html = " ".join(f'<span class="m-tag">{esc(t)}</span>' for t in hashtags.split() if t.startswith("#"))
+
+    vars_ = theme.css_vars()
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">
+<style>
+{font_css()}
+:root {{{vars_}}}
+* {{ box-sizing: border-box; }}
+html, body {{ margin: 0; padding: 0; background: #e8eef5; color: #1a1a1a; font-family: var(--font); }}
+body {{ padding: 20px; }}
+.card {{
+  width: 720px; margin: 0 auto; background: #fff;
+  border: 1px solid #c0c8d0; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}}
+.top {{
+  display: flex; gap: 16px; padding: 16px 18px;
+  background: linear-gradient(180deg, #f0f5fb 0%, #fff 100%);
+  border-bottom: 1px solid #d0d8e0;
+}}
+.icon {{
+  width: 72px; height: 72px; flex: 0 0 72px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid #c0c8d0; border-radius: 4px; background: #fff;
+  font-size: 42px;
+}}
+.meta {{ flex: 1; min-width: 0; }}
+.m-row {{ margin: 4px 0; font-size: 16px; line-height: 1.35; }}
+.m-lab {{ color: #555; font-weight: 600; }}
+.m-val {{ color: #1a1a1a; }}
+.body {{ padding: 16px 18px; }}
+.title-line {{ font-weight: 700; font-size: 18px; margin-bottom: 10px; color: #1a1a1a; }}
+.desc {{ font-size: 16px; line-height: 1.45; margin-bottom: 12px; white-space: pre-wrap; }}
+.tags {{ margin: 8px 0 12px; }}
+.m-tag {{ color: #0066cc; margin-right: 8px; font-size: 15px; }}
+.footer-red {{
+  margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d0d0d0;
+  color: #c41e3a; font-size: 14px; line-height: 1.4;
+}}
+</style>
+</head>
+<body>
+<article class="card" id="infobox">
+  <div class="top">
+    <div class="icon">🔗</div>
+    <div class="meta">
+      {"".join(rows)}
+    </div>
+  </div>
+  <div class="body">
+    <div class="title-line">{esc(title)}</div>
+    <div class="desc">{desc_html}</div>
+    <div class="tags">{tags_html}</div>
+    <div class="footer-red">{value_html(footer_text)}</div>
+  </div>
+</article>
+</body>
+</html>"""
+
+
 def make_html(
     page: Page,
     theme: Theme | None = None,
     work_dir: str | Path = ".",
     watermark: bool = True,
 ) -> str:
+    if page.type == "mirotorets" or (theme and theme.key == "mirotorets"):
+        return make_mirotorets_html(page, theme or get_theme("mirotorets"), work_dir, watermark=False)
+
     tpl = get_template(page.type)
     theme = theme or get_theme(page.theme)
     d = page.data
@@ -370,8 +477,10 @@ body {{ padding: 26px; font-family: var(--font); font-size: 20px; line-height: 1
 }}
 header {{ padding: 24px 28px 20px; text-align: center; background: var(--panel-alt); border-bottom: var(--border-width) solid var(--border); }}
 .kind {{ color: var(--accent); font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
-h1 {{ margin: 5px 0 0; overflow-wrap: anywhere; font: 700 36px/1.16 var(--heading-font); }}
+h1 {{ margin: 5px 0 0; overflow-wrap: anywhere; font: 700 36px/1.16 var(--heading-font); color: var(--link); }}
 .subtitle {{ margin-top: 9px; color: var(--text-secondary); font-size: 19px; }}
+a, .wiki-link {{ color: var(--link); text-decoration: none; }}
+a:hover, .wiki-link:hover {{ text-decoration: underline; }}
 .gallery {{ margin: 20px; }}
 .gallery.multi {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
 .gallery.multi figure:last-child:nth-child(odd) {{ grid-column: 1 / -1; }}
@@ -467,6 +576,9 @@ async def render_page(
 
         await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
         return path
+
+    if page.type == "mirotorets" or page.theme == "mirotorets":
+        watermark = False
 
     try:
         from playwright.async_api import async_playwright
