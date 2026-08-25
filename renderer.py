@@ -313,9 +313,9 @@ def make_mirotorets_html(
     work_dir: str | Path = ".",
     watermark: bool = False,
 ) -> str:
-    """Карточка в стиле Миротворца без водяных знаков."""
+    """Карточка точь-в-точь как на сайте Миротворец, без водяных знаков."""
     d = page.data
-    title = str(d.get("title") or page.title or "Без имени").strip()
+    title = str(d.get("title") or page.title or "").strip()
     birth = str(d.get("birth_date") or "").strip()
     country = str(d.get("country") or "Россия").strip()
     rank = str(d.get("rank") or "").strip()
@@ -324,32 +324,88 @@ def make_mirotorets_html(
     personal = str(d.get("personal_number") or "").strip()
     passport = str(d.get("passport") or "").strip()
     birth_place = str(d.get("birth_place") or "").strip()
-    desc = str(d.get("description") or "Российский военный преступник.\nУчастник нападения фашистской россии на Украину 24.02.2022.\nВ/служащий вооруженных сил российской федерации.").strip()
+    desc = str(
+        d.get("description")
+        or (
+            "Российский военный преступник.\n"
+            "Участник нападения фашистской россии на Украину 24.02.2022.\n"
+            "В/служащий вооруженных сил российской федерации."
+        )
+    ).strip()
     hashtags = str(d.get("hashtags") or "#StopRussianAggression").strip()
-    footer_text = str(d.get("footer") or "Центр «Миротворец» просит правоохранительные органы рассматривать данную публикацию на сайте как заявление о совершении этим гражданином осознанных деяний против национальной безопасности Украины, мира, безопасности человечества и международного правопорядка, а также иных правонарушений.").strip()
+    footer_text = str(
+        d.get("footer")
+        or (
+            "Центр «Миротворец» просит правоохранительные органы рассматривать данную "
+            "публикацию на сайте как заявление о совершении этим гражданином осознанных деяний "
+            "против национальной безопасности Украины, мира, безопасности человечества и "
+            "международного правопорядка, а также иных правонарушений."
+        )
+    ).strip()
 
-    rows = []
+    # верхний блок: только дата + страна (как на скрине)
+    top_meta = []
     if birth:
-        rows.append(f'<div class="m-row"><span class="m-lab">Дата рождения:</span> <span class="m-val">{esc(birth)}</span></div>')
+        top_meta.append(
+            f'<div class="top-line"><span class="tl">Дата рождения:</span> '
+            f'<span class="tv">{esc(birth)}</span></div>'
+        )
     if country:
-        rows.append(f'<div class="m-row"><span class="m-lab">Страна:</span> <span class="m-val">{esc(country)}</span></div>')
+        top_meta.append(
+            f'<div class="top-line"><span class="tl">Страна:</span> '
+            f'<span class="tv">{esc(country)}</span></div>'
+        )
+
+    # основной текст: описание + поля в том же порядке что на скрине
+    body_lines = []
+    if title:
+        body_lines.append(f'<div class="name-line">{esc(title)}</div>')
+    for line in desc.split("\n"):
+        line = line.strip()
+        if line:
+            body_lines.append(f'<div class="line">{esc(line)}</div>')
     if unit:
-        rows.append(f'<div class="m-row"><span class="m-lab">Подразделение:</span> <span class="m-val">{esc(unit)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Подразделение:</span> {esc(unit)}</div>'
+        )
     if position:
-        rows.append(f'<div class="m-row"><span class="m-lab">Должность:</span> <span class="m-val">{esc(position)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Должность:</span> {esc(position)}</div>'
+        )
     if rank:
-        rows.append(f'<div class="m-row"><span class="m-lab">Звание:</span> <span class="m-val">{esc(rank)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Звание:</span> {esc(rank)}</div>'
+        )
     if personal:
-        rows.append(f'<div class="m-row"><span class="m-lab">Личный номер:</span> <span class="m-val">{esc(personal)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Личный номер:</span> {esc(personal)}</div>'
+        )
+    # дата рождения ещё раз в теле (как на оригинале)
+    if birth:
+        body_lines.append(
+            f'<div class="line"><span class="lab">Дата рождения:</span> {esc(birth)}</div>'
+        )
     if passport:
-        rows.append(f'<div class="m-row"><span class="m-lab">Паспорт:</span> <span class="m-val">{esc(passport)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Паспорт:</span> {esc(passport)}</div>'
+        )
     if birth_place:
-        rows.append(f'<div class="m-row"><span class="m-lab">Место рождения:</span> <span class="m-val">{esc(birth_place)}</span></div>')
+        body_lines.append(
+            f'<div class="line"><span class="lab">Место рождения:</span> {esc(birth_place)}</div>'
+        )
+    body_lines.append('<div class="line">Источник</div>')
 
-    desc_html = value_html(desc).replace("\n", "<br>")
-    tags_html = " ".join(f'<span class="m-tag">{esc(t)}</span>' for t in hashtags.split() if t.startswith("#"))
+    tags = [t for t in hashtags.split() if t.startswith("#")]
+    tags_html = "".join(f'<div class="tag">{esc(t)}</div>' for t in tags)
 
-    vars_ = theme.css_vars()
+    # одно фото слева или N/D
+    photo_html = '<div class="nd">N/D</div>'
+    imgs = page_images(d)
+    if imgs:
+        uri = image_uri(imgs[0], work_dir)
+        if uri:
+            photo_html = f'<img class="photo" src="{uri}" alt="">'
+
     return f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -357,54 +413,125 @@ def make_mirotorets_html(
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">
 <style>
 {font_css()}
-:root {{{vars_}}}
-* {{ box-sizing: border-box; }}
-html, body {{ margin: 0; padding: 0; background: #e8eef5; color: #1a1a1a; font-family: var(--font); }}
-body {{ padding: 20px; }}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html, body {{
+  background: #f4f6f9;
+  color: #1a1a1a;
+  font-family: 'DejaVu Sans', Arial, Helvetica, sans-serif;
+}}
+body {{ padding: 16px; }}
 .card {{
-  width: 720px; margin: 0 auto; background: #fff;
-  border: 1px solid #c0c8d0; border-radius: 6px; overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  width: 780px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid #b8c0cc;
+  overflow: hidden;
 }}
-.top {{
-  display: flex; gap: 16px; padding: 16px 18px;
-  background: linear-gradient(180deg, #f0f5fb 0%, #fff 100%);
-  border-bottom: 1px solid #d0d8e0;
+.header {{
+  height: 36px;
+  background: #1a5fb4;
 }}
-.icon {{
-  width: 72px; height: 72px; flex: 0 0 72px;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid #c0c8d0; border-radius: 4px; background: #fff;
-  font-size: 42px;
+.top-row {{
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #c5cdd8;
+  background: #fff;
 }}
-.meta {{ flex: 1; min-width: 0; }}
-.m-row {{ margin: 4px 0; font-size: 16px; line-height: 1.35; }}
-.m-lab {{ color: #555; font-weight: 600; }}
-.m-val {{ color: #1a1a1a; }}
-.body {{ padding: 16px 18px; }}
-.title-line {{ font-weight: 700; font-size: 18px; margin-bottom: 10px; color: #1a1a1a; }}
-.desc {{ font-size: 16px; line-height: 1.45; margin-bottom: 12px; white-space: pre-wrap; }}
-.tags {{ margin: 8px 0 12px; }}
-.m-tag {{ color: #0066cc; margin-right: 8px; font-size: 15px; }}
+.icon-box {{
+  width: 130px;
+  flex: 0 0 130px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #c5cdd8;
+  padding: 8px;
+  background: #fff;
+  min-height: 110px;
+}}
+.icon-box .photo {{
+  display: block;
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border: 1px solid #c5cdd8;
+  background: #f0f0f0;
+}}
+.icon-box .nd {{
+  width: 100%;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c5cdd8;
+  background: #f7f8fa;
+  color: #666;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}}
+.meta-box {{
+  flex: 1;
+  padding: 16px 18px 14px;
+  position: relative;
+  background: #fff;
+}}
+.top-line {{
+  font-size: 17px;
+  line-height: 1.45;
+  margin-bottom: 2px;
+}}
+.tl {{ color: #222; font-weight: 600; }}
+.tv {{ color: #222; }}
+.dash {{
+  margin-top: 10px;
+  border-bottom: 1px dashed #9aa3b0;
+  width: 100%;
+}}
+.body {{
+  padding: 16px 20px 18px;
+  background: #fff;
+  font-size: 16.5px;
+  line-height: 1.48;
+}}
+.name-line {{
+  font-weight: 700;
+  font-size: 17.5px;
+  margin-bottom: 6px;
+  color: #111;
+}}
+.line {{
+  margin: 1px 0;
+  color: #1a1a1a;
+}}
+.lab {{ font-weight: 600; }}
+.tag {{
+  color: #1a1a1a;
+  margin: 2px 0;
+}}
 .footer-red {{
-  margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d0d0d0;
-  color: #c41e3a; font-size: 14px; line-height: 1.4;
+  margin-top: 14px;
+  padding-top: 4px;
+  color: #c41e3a;
+  font-size: 14.5px;
+  line-height: 1.42;
+  font-weight: 500;
 }}
 </style>
 </head>
 <body>
 <article class="card" id="infobox">
-  <div class="top">
-    <div class="icon">🔗</div>
-    <div class="meta">
-      {"".join(rows)}
+  <div class="header"></div>
+  <div class="top-row">
+    <div class="icon-box">{photo_html}</div>
+    <div class="meta-box">
+      {"".join(top_meta)}
+      <div class="dash"></div>
     </div>
   </div>
   <div class="body">
-    <div class="title-line">{esc(title)}</div>
-    <div class="desc">{desc_html}</div>
-    <div class="tags">{tags_html}</div>
-    <div class="footer-red">{value_html(footer_text)}</div>
+    {"".join(body_lines)}
+    {tags_html}
+    <div class="footer-red">{esc(footer_text)}</div>
   </div>
 </article>
 </body>

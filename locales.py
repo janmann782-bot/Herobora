@@ -31,9 +31,7 @@ RU = {
     'choose_type': (
         f'{FRAME}\n'
         'Что делаем?\n'
-        f'{FRAME}\n'
-        'Сверху обычные карточки\n'
-        'Снизу TFR и миротворец'
+        f'{FRAME}'
     ),
     'field_prompt': (
         f'{FRAME}\n'
