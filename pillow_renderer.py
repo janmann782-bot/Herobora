@@ -1105,7 +1105,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         field_rows.append(("", "Источник"))
     for lab, val in field_rows:
         if lab:
-            body_lines.append((f"{lab} {val}", f_lab, (0, 0, 0)))
+            body_lines.append((f"{lab} {val}", f_body, (0, 0, 0)))
         else:
             body_lines.append((val, f_body, (0, 0, 0)))
     for tg in hashtags.split():
@@ -1167,18 +1167,14 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     mx = div_x + int(14 * s)
     my = header_h + int(18 * s)
     row_h = int(26 * s)
-    f_top_b = font(17, bold=True)
     if birth:
-        lab, val = "Дата рождения: ", birth
-        dr.text((mx, my), lab, fill=(0, 0, 0), font=f_top_b)
-        dr.text((mx + f_top_b.getlength(lab), my), val, fill=(0, 0, 0), font=f_top)
+        line = f"Дата рождения: {birth}"
+        dr.text((mx, my), line, fill=(0, 0, 0), font=f_top)
         my += row_h
     country_line = ""
     if country:
-        lab, val = "Страна: ", country
-        dr.text((mx, my), lab, fill=(0, 0, 0), font=f_top_b)
-        dr.text((mx + f_top_b.getlength(lab), my), val, fill=(0, 0, 0), font=f_top)
-        country_line = lab + val
+        country_line = f"Страна: {country}"
+        dr.text((mx, my), country_line, fill=(0, 0, 0), font=f_top)
         # пунктир под строкой "Страна", на всю ширину правой колонки
         dash_y = my + int(22 * s)
         dash_end = W - pad

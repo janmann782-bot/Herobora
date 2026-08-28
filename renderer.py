@@ -493,7 +493,7 @@ body {{ padding: 16px; }}
   line-height: 1.45;
   margin-bottom: 2px;
 }}
-.tl {{ color: #000; font-weight: 700; }}
+.tl {{ color: #000; font-weight: 400; }}
 .tv {{ color: #000; }}
 .dash {{
   display: block;
@@ -518,7 +518,7 @@ body {{ padding: 16px; }}
   margin: 1px 0;
   color: #000;
 }}
-.lab {{ font-weight: 700; color: #000; }}
+.lab {{ font-weight: 400; color: #000; }}
 .tag {{
   color: #1a1a1a;
   margin: 2px 0;
