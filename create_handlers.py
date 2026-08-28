@@ -82,17 +82,11 @@ async def ask_field(msg: Message, state: FSMContext) -> None:
         ptype = d.get("type") or ""
         max_count = 1 if ptype in ("news", "superevent", "mirotorets") else MAX_PAGE_IMAGES
         if ptype in ("news", "superevent", "mirotorets"):
-            if ptype == "superevent":
-                label = "суперевенту"
-            elif ptype == "mirotorets":
-                label = "миротворцу"
-            else:
-                label = "новости"
             text = (
                 f"▬▬ι══════════════ι▬▬\n"
                 f"Картинка\n"
                 f"▬▬ι══════════════ι▬▬\n"
-                f"Кинь одно фото к {label} (или без фото - N/D)\n"
+                f"Кинь фотографию или не кинь\n"
                 f"PNG JPEG WEBP до {d.get('max_image_mb', 12)} МБ\n"
                 f"Сейчас: {count}/{max_count}"
             )
@@ -216,9 +210,14 @@ async def show_quick(msg: Message, state: FSMContext) -> None:
 
 
 async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, user_id: int, kind: str, user=None) -> None:
+    from admin import is_admin
     try:
         get_template(kind)
     except ValueError:
+        return
+    # миротворец только админам - жёсткий запрет на любом пути
+    if kind == "mirotorets" and not is_admin(user_id):
+        await msg.answer("Миротворец недоступен")
         return
     s = await db.get_settings(user_id)
     # сохраняем id текущего сообщения мастера, если оно уже есть
@@ -253,7 +252,11 @@ async def begin_new_page(msg: Message, state: FSMContext, db: Db, cfg: Config, u
 
 @router.callback_query(F.data.startswith("new:"))
 async def start_new(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    from admin import is_admin
     kind = q.data.split(":", 1)[1]
+    if kind == "mirotorets" and not is_admin(q.from_user.id if q.from_user else None):
+        await q.answer("Недоступно", show_alert=True)
+        return
     try:
         label = get_template(kind).label
     except ValueError:
@@ -315,8 +318,15 @@ async def back_field(q: CallbackQuery, state: FSMContext) -> None:
     d = await state.get_data()
     i = int(d.get("i", 0))
     if i <= 0:
+        from admin import is_admin
         await state.clear()
-        await flow_show(q, state, tr("choose_type"), types_kb(), as_new=True)
+        await flow_show(
+            q,
+            state,
+            tr("choose_type"),
+            types_kb(admin=is_admin(q.from_user.id if q.from_user else None)),
+            as_new=True,
+        )
         return
     await state.update_data(i=i - 1)
     await ask_field(q.message, state)
@@ -785,17 +795,11 @@ async def replace_draft_image(q: CallbackQuery, state: FSMContext, cfg: Config) 
     await state.update_data(image_mode="draft")
     await state.set_state(NewPage.image)
     if ptype in ("news", "superevent", "mirotorets"):
-        if ptype == "superevent":
-            label = "суперевенту"
-        elif ptype == "mirotorets":
-            label = "миротворцу"
-        else:
-            label = "новости"
         text = (
             f"▬▬ι══════════════ι▬▬\n"
             f"Картинка\n"
             f"▬▬ι══════════════ι▬▬\n"
-            f"Кинь одно фото к {label} (или без фото - N/D)\n"
+            f"Кинь фотографию или не кинь\n"
             f"PNG JPEG или WEBP до {cfg.max_image_mb} МБ\n"
             f"Сейчас: {count}/{max_c}"
         )
@@ -922,6 +926,11 @@ async def quick_input(msg: Message, state: FSMContext, db: Db, cfg: Config) -> N
     parsed = parse_text(text)
     if parsed.recognized < 2:
         await msg.answer(tr("quick_hint"), reply_markup=main_menu())
+        return
+
+    from admin import is_admin
+    if parsed.type == "mirotorets" and not is_admin(msg.from_user.id if msg.from_user else None):
+        await msg.answer("Миротворец недоступен", reply_markup=main_menu())
         return
 
     s = await db.get_settings(msg.from_user.id)

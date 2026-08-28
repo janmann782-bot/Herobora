@@ -358,8 +358,6 @@ def make_mirotorets_html(
 
     # основной текст: описание + поля в том же порядке что на скрине
     body_lines = []
-    if title:
-        body_lines.append(f'<div class="name-line">{esc(title)}</div>')
     for line in desc.split("\n"):
         line = line.strip()
         if line:
@@ -704,7 +702,9 @@ async def render_page(
         await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
         return path
 
-    if page.type == "mirotorets" or page.theme == "mirotorets":
+    # миротворец всегда своей темой и без водяного знака
+    if page.type == "mirotorets":
+        page.theme = "mirotorets"
         watermark = False
 
     try:

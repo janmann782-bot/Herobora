@@ -51,10 +51,12 @@ def main_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def types_kb() -> InlineKeyboardMarkup:
+def types_kb(*, admin: bool = False) -> InlineKeyboardMarkup:
     ordinary = []
     special = []
     for x in TEMPLATES.values():
+        if x.key == "mirotorets" and not admin:
+            continue
         btn = ib(f"{x.emoji} {x.label}", f"new:{x.key}")
         if x.key in SPECIAL_TYPES:
             special.append([btn])

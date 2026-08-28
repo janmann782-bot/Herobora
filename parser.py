@@ -23,6 +23,10 @@ TYPE_ALIASES = {
     "политик": "person",
     "человек": "person",
     "person": "person",
+    "миротворец": "mirotorets",
+    "миротворець": "mirotorets",
+    "mirotorets": "mirotorets",
+    "myrotvorets": "mirotorets",
 }
 
 

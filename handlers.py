@@ -75,8 +75,9 @@ async def help_message(msg: Message) -> None:
 @router.message(Command("create"))
 @router.message(F.text == CREATE)
 async def create(msg: Message, state: FSMContext, db: Db, cfg: Config) -> None:
+    from admin import is_admin
     await clear_flow(state, msg.from_user.id, db, cfg)
-    await flow_show(msg, state, tr("choose_type"), types_kb(), as_new=True)
+    await flow_show(msg, state, tr("choose_type"), types_kb(admin=is_admin(msg.from_user.id)), as_new=True)
 
 
 @router.message(Command("cancel"))
