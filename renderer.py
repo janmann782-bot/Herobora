@@ -354,6 +354,7 @@ def make_mirotorets_html(
         top_meta.append(
             f'<div class="top-line"><span class="tl">Страна:</span> '
             f'<span class="tv">{esc(country)}</span></div>'
+            f'<div class="dash"></div>'
         )
 
     # основной текст: описание + поля в том же порядке что на скрине
@@ -436,27 +437,26 @@ body {{ padding: 16px; }}
   background: #fff;
 }}
 .icon-box {{
-  width: 130px;
-  flex: 0 0 130px;
+  width: 128px;
+  flex: 0 0 128px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-right: 1px solid #c5cdd8;
-  padding: 8px;
+  padding: 12px;
   background: #fff;
-  min-height: 110px;
 }}
 .icon-box .photo {{
   display: block;
-  width: 100%;
-  height: 110px;
+  width: 112px;
+  height: 112px;
   object-fit: cover;
   border: 1px solid #c5cdd8;
   background: #f0f0f0;
 }}
 .icon-box .nd {{
-  width: 100%;
-  height: 110px;
+  width: 112px;
+  height: 112px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -481,9 +481,11 @@ body {{ padding: 16px; }}
 .tl {{ color: #222; font-weight: 600; }}
 .tv {{ color: #222; }}
 .dash {{
-  margin-top: 10px;
+  display: block;
+  margin-top: 6px;
   border-bottom: 1px dashed #9aa3b0;
   width: 100%;
+  height: 0;
 }}
 .body {{
   padding: 16px 20px 18px;
@@ -523,7 +525,6 @@ body {{ padding: 16px; }}
     <div class="icon-box">{photo_html}</div>
     <div class="meta-box">
       {"".join(top_meta)}
-      <div class="dash"></div>
     </div>
   </div>
   <div class="body">

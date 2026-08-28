@@ -1010,7 +1010,6 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         return ImageFont.load_default()
 
     f_body = font(16.5)
-    f_lab = font(16.5, bold=True)
     f_nd = font(22, bold=True)
     f_foot = font(14.5)
     f_top = font(17)
@@ -1042,9 +1041,9 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         )
     ).strip()
 
-    # photo
-    photo_box_w = int(130 * s)
-    photo_h = int(110 * s)
+    # фото: фиксированный квадрат, картинка вписана целиком, рамка ровно по боксу
+    photo_side = int(112 * s)
+    bw = max(1, int(1 * s))
     photo_img = None
     imgs = page_images(d)
     if imgs:
@@ -1052,8 +1051,13 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         mp = raw if raw.is_absolute() else (root / raw)
         if mp.is_file():
             try:
-                photo_img = Image.open(mp).convert("RGB")
-                photo_img = ImageOps.fit(photo_img, (photo_box_w - int(16 * s), photo_h), method=Image.Resampling.LANCZOS)
+                src = Image.open(mp).convert("RGB")
+                # cover: заполняет бокс без полей внутри рамки
+                photo_img = ImageOps.fit(
+                    src,
+                    (photo_side, photo_side),
+                    method=Image.Resampling.LANCZOS,
+                )
             except Exception:
                 photo_img = None
 
@@ -1072,7 +1076,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         lines.append(cur)
         return lines
 
-    body_lines: list[tuple[str, object, tuple]] = []  # text, font, color
+    body_lines: list[tuple[str, object, tuple]] = []
     for line in desc.split("\n"):
         line = line.strip()
         if line:
@@ -1098,9 +1102,9 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
             body_lines.append((f"{lab} {val}", f_body, text_c))
         else:
             body_lines.append((val, f_body, text_c))
-    for t in hashtags.split():
-        if t.startswith("#"):
-            body_lines.append((t, f_body, text_c))
+    for tg in hashtags.split():
+        if tg.startswith("#"):
+            body_lines.append((tg, f_body, text_c))
 
     body_w = W - 2 * pad
     line_h = int(24 * s)
@@ -1114,54 +1118,67 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     body_h += int(14 * s) + len(foot_ls) * int(21 * s)
 
     header_h = int(36 * s)
-    top_h = max(photo_h + int(16 * s), int(90 * s))
+    # верхний блок: фото + мета; высота = фото + поля сверху/снизу
+    top_pad = int(12 * s)
+    top_h = photo_side + top_pad * 2
     total_h = header_h + top_h + pad + body_h + pad
 
     im = Image.new("RGB", (W, total_h), bg)
     dr = ImageDraw.Draw(im)
 
-    # blue header
+    # синяя шапка
     dr.rectangle([0, 0, W, header_h], fill=blue)
-    # border
+    # внешняя рамка карточки
     dr.rectangle([0, 0, W - 1, total_h - 1], outline=border, width=max(1, int(s)))
 
-    # photo box
-    bx0, by0 = int(8 * s), header_h + int(8 * s)
-    bx1, by1 = bx0 + photo_box_w, by0 + photo_h
-    dr.rectangle([bx0, by0, bx1, by1], outline=border, width=max(1, int(s)), fill=light)
+    # фото слева, рамка ровно по краю картинки
+    bx0 = int(12 * s)
+    by0 = header_h + top_pad
+    bx1 = bx0 + photo_side
+    by1 = by0 + photo_side
     if photo_img is not None:
-        ox = bx0 + (photo_box_w - photo_img.width) // 2
-        oy = by0 + (photo_h - photo_img.height) // 2
-        im.paste(photo_img, (ox, oy))
+        im.paste(photo_img, (bx0, by0))
+        dr.rectangle([bx0, by0, bx1 - 1, by1 - 1], outline=border, width=bw)
     else:
+        dr.rectangle([bx0, by0, bx1 - 1, by1 - 1], outline=border, width=bw, fill=light)
         nd = "N/D"
         tw = f_nd.getlength(nd)
-        dr.text((bx0 + (photo_box_w - tw) / 2, by0 + (photo_h - int(28 * s)) / 2), nd, fill=gray, font=f_nd)
+        dr.text(
+            (bx0 + (photo_side - tw) / 2, by0 + (photo_side - int(28 * s)) / 2),
+            nd,
+            fill=gray,
+            font=f_nd,
+        )
 
-    # vertical divider
-    div_x = bx1 + int(4 * s)
+    # вертикальный разделитель
+    div_x = bx1 + int(10 * s)
     dr.line([div_x, header_h, div_x, header_h + top_h], fill=border, width=max(1, int(s)))
 
-    # meta
+    # мета справа: дата, страна, пунктир ТОЛЬКО под строкой "Страна"
     mx = div_x + int(14 * s)
-    my = header_h + int(16 * s)
+    my = header_h + int(18 * s)
+    row_h = int(26 * s)
     if birth:
         dr.text((mx, my), f"Дата рождения: {birth}", fill=text_c, font=f_top)
-        my += int(26 * s)
-    if country:
-        dr.text((mx, my), f"Страна: {country}", fill=text_c, font=f_top)
-        my += int(26 * s)
-    # dashed line
-    dash_y = header_h + top_h - int(14 * s)
-    x = mx
-    while x < W - pad:
-        dr.line([x, dash_y, min(x + int(8 * s), W - pad), dash_y], fill=(154, 163, 176), width=max(1, int(s)))
-        x += int(14 * s)
+        my += row_h
+    country_line = f"Страна: {country}" if country else ""
+    if country_line:
+        dr.text((mx, my), country_line, fill=text_c, font=f_top)
+        # пунктир под строкой "Страна", на всю ширину правой колонки
+        dash_y = my + int(22 * s)
+        dash_end = W - pad
+        x = mx
+        dash_len = int(6 * s)
+        gap = int(5 * s)
+        while x < dash_end:
+            x2 = min(x + dash_len, dash_end)
+            dr.line([x, dash_y, x2, dash_y], fill=(154, 163, 176), width=max(1, int(s)))
+            x += dash_len + gap
 
-    # horizontal under top
+    # линия под верхним блоком
     dr.line([0, header_h + top_h, W, header_h + top_h], fill=border, width=max(1, int(s)))
 
-    # body
+    # тело
     y = header_h + top_h + pad
     for ls, fnt, col in wrapped:
         for line in ls:
@@ -1175,6 +1192,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     path = Path(path)
     im.save(path, format="PNG", optimize=True)
     return path
+
 
 
 def render_pillow(
