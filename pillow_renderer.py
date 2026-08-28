@@ -178,7 +178,7 @@ def _header(w: int, s: float, tpl: Template, page: Page, theme: Theme) -> Image.
     draw = ImageDraw.Draw(img)
     y = pad
     if kind_lines:
-        _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.accent, kh, w - pad * 2, "center")
+        _draw_lines(draw, kind_lines, (pad, y), kind_font, (0, 0, 0), kh, w - pad * 2, "center")
         y += len(kind_lines) * kh + gap
     _draw_lines(draw, title_lines, (pad, y), title_font, theme.text, th, w - pad * 2, "center")
     y += len(title_lines) * th
@@ -995,7 +995,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     pad = int(16 * s)
     blue = (26, 95, 180)
     border = (184, 192, 204)
-    text_c = (26, 26, 26)
+    text_c = (0, 0, 0)
     red = (196, 30, 58)
     gray = (102, 102, 102)
     bg = (255, 255, 255)
@@ -1010,6 +1010,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         return ImageFont.load_default()
 
     f_body = font(16.5)
+    f_lab = font(16.5, bold=True)
     f_nd = font(22, bold=True)
     f_foot = font(14.5)
     f_top = font(17)
@@ -1022,6 +1023,8 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     personal = str(d.get("personal_number") or "").strip()
     passport = str(d.get("passport") or "").strip()
     birth_place = str(d.get("birth_place") or "").strip()
+    source = str(d.get("source") or "").strip()
+    name_title = str(d.get("title") or page.title or "").strip()
     desc = str(
         d.get("description")
         or (
@@ -1080,7 +1083,7 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     for line in desc.split("\n"):
         line = line.strip()
         if line:
-            body_lines.append((line, f_body, text_c))
+            body_lines.append((line, f_body, (0, 0, 0)))
     field_rows = []
     if unit:
         field_rows.append(("Подразделение:", unit))
@@ -1096,15 +1099,18 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
         field_rows.append(("Паспорт:", passport))
     if birth_place:
         field_rows.append(("Место рождения:", birth_place))
-    field_rows.append(("", "Источник"))
+    if source:
+        field_rows.append(("Источник:", source))
+    else:
+        field_rows.append(("", "Источник"))
     for lab, val in field_rows:
         if lab:
-            body_lines.append((f"{lab} {val}", f_body, text_c))
+            body_lines.append((f"{lab} {val}", f_lab, (0, 0, 0)))
         else:
-            body_lines.append((val, f_body, text_c))
+            body_lines.append((val, f_body, (0, 0, 0)))
     for tg in hashtags.split():
         if tg.startswith("#"):
-            body_lines.append((tg, f_body, text_c))
+            body_lines.append((tg, f_body, (0, 0, 0)))
 
     body_w = W - 2 * pad
     line_h = int(24 * s)
@@ -1126,8 +1132,11 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     im = Image.new("RGB", (W, total_h), bg)
     dr = ImageDraw.Draw(im)
 
-    # синяя шапка
+    # синяя шапка + имя слева
     dr.rectangle([0, 0, W, header_h], fill=blue)
+    if name_title:
+        f_name = font(15, bold=True)
+        dr.text((int(14 * s), header_h // 2 - int(10 * s)), name_title, fill=(255, 255, 255), font=f_name)
     # внешняя рамка карточки
     dr.rectangle([0, 0, W - 1, total_h - 1], outline=border, width=max(1, int(s)))
 
@@ -1158,12 +1167,18 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
     mx = div_x + int(14 * s)
     my = header_h + int(18 * s)
     row_h = int(26 * s)
+    f_top_b = font(17, bold=True)
     if birth:
-        dr.text((mx, my), f"Дата рождения: {birth}", fill=text_c, font=f_top)
+        lab, val = "Дата рождения: ", birth
+        dr.text((mx, my), lab, fill=(0, 0, 0), font=f_top_b)
+        dr.text((mx + f_top_b.getlength(lab), my), val, fill=(0, 0, 0), font=f_top)
         my += row_h
-    country_line = f"Страна: {country}" if country else ""
-    if country_line:
-        dr.text((mx, my), country_line, fill=text_c, font=f_top)
+    country_line = ""
+    if country:
+        lab, val = "Страна: ", country
+        dr.text((mx, my), lab, fill=(0, 0, 0), font=f_top_b)
+        dr.text((mx + f_top_b.getlength(lab), my), val, fill=(0, 0, 0), font=f_top)
+        country_line = lab + val
         # пунктир под строкой "Страна", на всю ширину правой колонки
         dash_y = my + int(22 * s)
         dash_end = W - pad

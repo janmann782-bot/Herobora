@@ -324,6 +324,7 @@ def make_mirotorets_html(
     personal = str(d.get("personal_number") or "").strip()
     passport = str(d.get("passport") or "").strip()
     birth_place = str(d.get("birth_place") or "").strip()
+    source = str(d.get("source") or "").strip()
     desc = str(
         d.get("description")
         or (
@@ -392,7 +393,10 @@ def make_mirotorets_html(
         body_lines.append(
             f'<div class="line"><span class="lab">Место рождения:</span> {esc(birth_place)}</div>'
         )
-    body_lines.append('<div class="line">Источник</div>')
+    if source:
+        body_lines.append(f'<div class="line"><span class="lab">Источник:</span> {esc(source)}</div>')
+    else:
+        body_lines.append('<div class="line">Источник</div>')
 
     tags = [t for t in hashtags.split() if t.startswith("#")]
     tags_html = "".join(f'<div class="tag">{esc(t)}</div>' for t in tags)
@@ -429,6 +433,17 @@ body {{ padding: 16px; }}
 .header {{
   height: 36px;
   background: #1a5fb4;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}}
+.hdr-name {{
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }}
 .top-row {{
   display: flex;
@@ -478,8 +493,8 @@ body {{ padding: 16px; }}
   line-height: 1.45;
   margin-bottom: 2px;
 }}
-.tl {{ color: #222; font-weight: 600; }}
-.tv {{ color: #222; }}
+.tl {{ color: #000; font-weight: 700; }}
+.tv {{ color: #000; }}
 .dash {{
   display: block;
   margin-top: 6px;
@@ -501,9 +516,9 @@ body {{ padding: 16px; }}
 }}
 .line {{
   margin: 1px 0;
-  color: #1a1a1a;
+  color: #000;
 }}
-.lab {{ font-weight: 600; }}
+.lab {{ font-weight: 700; color: #000; }}
 .tag {{
   color: #1a1a1a;
   margin: 2px 0;
@@ -520,7 +535,7 @@ body {{ padding: 16px; }}
 </head>
 <body>
 <article class="card" id="infobox">
-  <div class="header"></div>
+  <div class="header"><span class="hdr-name">{esc(title)}</span></div>
   <div class="top-row">
     <div class="icon-box">{photo_html}</div>
     <div class="meta-box">
@@ -602,7 +617,7 @@ body {{ padding: 26px; font-family: var(--font); font-size: 20px; line-height: 1
   border-radius: var(--radius);
 }}
 header {{ padding: 24px 28px 20px; text-align: center; background: var(--panel-alt); border-bottom: var(--border-width) solid var(--border); }}
-.kind {{ color: var(--accent); font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
+.kind {{ color: #000; font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
 h1 {{ margin: 5px 0 0; overflow-wrap: anywhere; font: 700 36px/1.16 var(--heading-font); color: var(--link); }}
 .subtitle {{ margin-top: 9px; color: var(--text-secondary); font-size: 19px; }}
 a, .wiki-link {{ color: var(--link); text-decoration: none; }}
