@@ -986,6 +986,197 @@ def _render_superevent_tfr(
     return output
 
 
+
+def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high") -> Path:
+    """Карточка в стиле сайта Миротворец (Pillow, без водяных знаков)."""
+    d = page.data or {}
+    s = PILLOW_SCALE.get(quality, PILLOW_SCALE["high"])
+    W = int(780 * s)
+    pad = int(16 * s)
+    blue = (26, 95, 180)
+    border = (184, 192, 204)
+    text_c = (26, 26, 26)
+    red = (196, 30, 58)
+    gray = (102, 102, 102)
+    bg = (255, 255, 255)
+    light = (247, 248, 250)
+
+    def font(sz, bold=False):
+        here = Path(__file__).resolve().parent
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        for cand in (here / name, Path("/usr/share/fonts/truetype/dejavu") / name):
+            if cand.is_file():
+                return ImageFont.truetype(str(cand), int(sz * s))
+        return ImageFont.load_default()
+
+    f_body = font(16.5)
+    f_lab = font(16.5, bold=True)
+    f_nd = font(22, bold=True)
+    f_foot = font(14.5)
+    f_top = font(17)
+
+    birth = str(d.get("birth_date") or "").strip()
+    country = str(d.get("country") or "Россия").strip()
+    rank = str(d.get("rank") or "").strip()
+    unit = str(d.get("unit") or "").strip()
+    position = str(d.get("position") or "").strip()
+    personal = str(d.get("personal_number") or "").strip()
+    passport = str(d.get("passport") or "").strip()
+    birth_place = str(d.get("birth_place") or "").strip()
+    desc = str(
+        d.get("description")
+        or (
+            "Российский военный преступник.\n"
+            "Участник нападения фашистской россии на Украину 24.02.2022.\n"
+            "В/служащий вооруженных сил российской федерации."
+        )
+    ).strip()
+    hashtags = str(d.get("hashtags") or "#StopRussianAggression").strip()
+    footer_text = str(
+        d.get("footer")
+        or (
+            "Центр «Миротворец» просит правоохранительные органы рассматривать данную "
+            "публикацию на сайте как заявление о совершении этим гражданином осознанных деяний "
+            "против национальной безопасности Украины, мира, безопасности человечества и "
+            "международного правопорядка, а также иных правонарушений."
+        )
+    ).strip()
+
+    # photo
+    photo_box_w = int(130 * s)
+    photo_h = int(110 * s)
+    photo_img = None
+    imgs = page_images(d)
+    if imgs:
+        raw = Path(imgs[0])
+        mp = raw if raw.is_absolute() else (root / raw)
+        if mp.is_file():
+            try:
+                photo_img = Image.open(mp).convert("RGB")
+                photo_img = ImageOps.fit(photo_img, (photo_box_w - int(16 * s), photo_h), method=Image.Resampling.LANCZOS)
+            except Exception:
+                photo_img = None
+
+    def wrap(text: str, fnt, max_w: int) -> list[str]:
+        words = str(text).split()
+        if not words:
+            return [""]
+        lines, cur = [], words[0]
+        for w in words[1:]:
+            trial = cur + " " + w
+            if fnt.getlength(trial) <= max_w:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+        return lines
+
+    body_lines: list[tuple[str, object, tuple]] = []  # text, font, color
+    for line in desc.split("\n"):
+        line = line.strip()
+        if line:
+            body_lines.append((line, f_body, text_c))
+    field_rows = []
+    if unit:
+        field_rows.append(("Подразделение:", unit))
+    if position:
+        field_rows.append(("Должность:", position))
+    if rank:
+        field_rows.append(("Звание:", rank))
+    if personal:
+        field_rows.append(("Личный номер:", personal))
+    if birth:
+        field_rows.append(("Дата рождения:", birth))
+    if passport:
+        field_rows.append(("Паспорт:", passport))
+    if birth_place:
+        field_rows.append(("Место рождения:", birth_place))
+    field_rows.append(("", "Источник"))
+    for lab, val in field_rows:
+        if lab:
+            body_lines.append((f"{lab} {val}", f_body, text_c))
+        else:
+            body_lines.append((val, f_body, text_c))
+    for t in hashtags.split():
+        if t.startswith("#"):
+            body_lines.append((t, f_body, text_c))
+
+    body_w = W - 2 * pad
+    line_h = int(24 * s)
+    body_h = 0
+    wrapped: list[tuple[list[str], object, tuple]] = []
+    for text, fnt, col in body_lines:
+        ls = wrap(text, fnt, body_w)
+        wrapped.append((ls, fnt, col))
+        body_h += len(ls) * line_h
+    foot_ls = wrap(footer_text, f_foot, body_w)
+    body_h += int(14 * s) + len(foot_ls) * int(21 * s)
+
+    header_h = int(36 * s)
+    top_h = max(photo_h + int(16 * s), int(90 * s))
+    total_h = header_h + top_h + pad + body_h + pad
+
+    im = Image.new("RGB", (W, total_h), bg)
+    dr = ImageDraw.Draw(im)
+
+    # blue header
+    dr.rectangle([0, 0, W, header_h], fill=blue)
+    # border
+    dr.rectangle([0, 0, W - 1, total_h - 1], outline=border, width=max(1, int(s)))
+
+    # photo box
+    bx0, by0 = int(8 * s), header_h + int(8 * s)
+    bx1, by1 = bx0 + photo_box_w, by0 + photo_h
+    dr.rectangle([bx0, by0, bx1, by1], outline=border, width=max(1, int(s)), fill=light)
+    if photo_img is not None:
+        ox = bx0 + (photo_box_w - photo_img.width) // 2
+        oy = by0 + (photo_h - photo_img.height) // 2
+        im.paste(photo_img, (ox, oy))
+    else:
+        nd = "N/D"
+        tw = f_nd.getlength(nd)
+        dr.text((bx0 + (photo_box_w - tw) / 2, by0 + (photo_h - int(28 * s)) / 2), nd, fill=gray, font=f_nd)
+
+    # vertical divider
+    div_x = bx1 + int(4 * s)
+    dr.line([div_x, header_h, div_x, header_h + top_h], fill=border, width=max(1, int(s)))
+
+    # meta
+    mx = div_x + int(14 * s)
+    my = header_h + int(16 * s)
+    if birth:
+        dr.text((mx, my), f"Дата рождения: {birth}", fill=text_c, font=f_top)
+        my += int(26 * s)
+    if country:
+        dr.text((mx, my), f"Страна: {country}", fill=text_c, font=f_top)
+        my += int(26 * s)
+    # dashed line
+    dash_y = header_h + top_h - int(14 * s)
+    x = mx
+    while x < W - pad:
+        dr.line([x, dash_y, min(x + int(8 * s), W - pad), dash_y], fill=(154, 163, 176), width=max(1, int(s)))
+        x += int(14 * s)
+
+    # horizontal under top
+    dr.line([0, header_h + top_h, W, header_h + top_h], fill=border, width=max(1, int(s)))
+
+    # body
+    y = header_h + top_h + pad
+    for ls, fnt, col in wrapped:
+        for line in ls:
+            dr.text((pad, y), line, fill=col, font=fnt)
+            y += line_h
+    y += int(10 * s)
+    for line in foot_ls:
+        dr.text((pad, y), line, fill=red, font=f_foot)
+        y += int(21 * s)
+
+    path = Path(path)
+    im.save(path, format="PNG", optimize=True)
+    return path
+
+
 def render_pillow(
     page: Page,
     work_dir: str | Path,
@@ -1001,6 +1192,8 @@ def render_pillow(
     root = Path(work_dir).resolve()
     path = Path(output).resolve()
 
+    if page.type == "mirotorets" or page.theme == "mirotorets":
+        return _render_mirotorets(page, root, path, quality)
     if page.type == "news":
         return _render_news_tfr(page, root, path)
     if page.type == "superevent":

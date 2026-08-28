@@ -702,10 +702,41 @@ async def render_page(
         await asyncio.to_thread(render_pillow, page, root, quality, path, watermark)
         return path
 
-    # миротворец всегда своей темой и без водяного знака
-    if page.type == "mirotorets":
+    # миротворец: своя вёрстка; Chromium или Pillow-карточка (не вики)
+    if page.type == "mirotorets" or page.theme == "mirotorets":
         page.theme = "mirotorets"
         watermark = False
+        try:
+            from playwright.async_api import async_playwright
+
+            async with _render_slots, async_playwright() as p:
+                browser = await p.chromium.launch(
+                    executable_path=p.chromium.executable_path,
+                    args=["--disable-dev-shm-usage"],
+                )
+                try:
+                    markup = make_mirotorets_html(page, get_theme("mirotorets"), root, watermark=False)
+                    ctx = await browser.new_context(
+                        viewport={"width": 820, "height": 1000},
+                        device_scale_factor=scale,
+                        service_workers="block",
+                    )
+                    tab = await ctx.new_page()
+                    await tab.set_content(markup, wait_until="load")
+                    await tab.evaluate("document.fonts.ready")
+                    await tab.wait_for_function("Array.from(document.images).every(x => x.complete)")
+                    card = tab.locator("#infobox")
+                    await card.screenshot(path=str(path), type="png", animations="disabled")
+                    await ctx.close()
+                finally:
+                    await browser.close()
+            return path
+        except Exception as chromium_error:
+            log.warning("Миротворец: Chromium недоступен, Pillow: %s", chromium_error)
+            from pillow_renderer import render_pillow
+
+            await asyncio.to_thread(render_pillow, page, root, quality, path, False)
+            return path
 
     try:
         from playwright.async_api import async_playwright
