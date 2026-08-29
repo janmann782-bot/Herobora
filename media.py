@@ -185,6 +185,27 @@ def set_page_images(data: dict, images: list[str]) -> None:
         data.pop("image_caption", None)
 
 
+
+
+def map_images(data: dict) -> list[str]:
+    out = []
+    for x in data.get("map_images") or []:
+        if isinstance(x, str) and x and x not in out:
+            out.append(x)
+    return out[:MAX_PAGE_IMAGES]
+
+
+def set_map_images(data: dict, images: list[str]) -> None:
+    items = []
+    for x in images:
+        if isinstance(x, str) and x and x not in items:
+            items.append(x)
+    items = items[:MAX_PAGE_IMAGES]
+    if items:
+        data["map_images"] = items
+    else:
+        data.pop("map_images", None)
+
 async def save_image(
     raw: bytes,
     owner_id: int,

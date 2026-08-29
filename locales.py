@@ -133,7 +133,9 @@ RU = {
         '<u>Язык</u>: {language}\n'
         '<u>Качество PNG</u>: {quality}\n'
         '<u>Формат</u>: {format}\n'
-        '<u>Подпись INFOBOX BOT</u>: {watermark}'
+        '<u>Подпись INFOBOX BOT</u>: {watermark}
+'
+        '<u>Шрифт</u>: {font}'
     ),
     'settings_theme': (
         f'{FRAME}\n'

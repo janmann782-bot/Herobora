@@ -85,6 +85,8 @@ async def render_saved(
                     cfg.work_dir,
                     s.quality,
                     watermark=s.watermark,
+                    font_key=getattr(s, "font", "default") or "default",
+                    user_id=p.owner_id,
                 ),
             )
             p.preview_path = path.name

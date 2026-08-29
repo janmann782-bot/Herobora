@@ -41,3 +41,4 @@ class UserSettings:
     quality: str = "high"
     export_format: str = "png"
     watermark: bool = True
+    font: str = "default"

@@ -8,10 +8,11 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from media import battle_image_groups, image_caption, page_images
+from media import battle_image_groups, image_caption, map_images, page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
+from fonts_catalog import css_family_name, font_css_for_family
 
 QUALITY_SCALE = {"standard": 1.5, "high": 2.0, "ultra": 2.5}
 _render_slots = asyncio.Semaphore(2)
@@ -557,6 +558,8 @@ def make_html(
     theme: Theme | None = None,
     work_dir: str | Path = ".",
     watermark: bool = True,
+    font_key: str = "default",
+    user_id: int | None = None,
 ) -> str:
     if page.type == "mirotorets" or (theme and theme.key == "mirotorets"):
         return make_mirotorets_html(page, theme or get_theme("mirotorets"), work_dir, watermark=False)
@@ -585,6 +588,39 @@ def make_html(
             mode = "single" if len(figures) == 1 else "multi"
             gallery = f'<div class="gallery {mode}">{"".join(figures)}</div>'
 
+    # гимн под картинками (как в вики)
+    anthem = str(d.get("anthem") or "").strip()
+    anthem_dur = str(d.get("anthem_duration") or "").strip()
+    anthem_html = ""
+    if anthem:
+        dur = esc(anthem_dur) if anthem_dur else "0:00"
+        anthem_html = (
+            '<div class="anthem-block">'
+            f'<div class="anthem-title">{value_html(anthem)}</div>'
+            '<div class="anthem-player">'
+            '<span class="anthem-play">▶</span>'
+            '<span class="anthem-bar"><span class="anthem-bar-fill"></span></span>'
+            f'<span class="anthem-time">{dur}</span>'
+            '</div></div>'
+        )
+
+    # карты территорий
+    map_imgs = []
+    for i, path in enumerate(map_images(d)):
+        uri = image_uri(path, work_dir)
+        if uri:
+            cap = image_caption(d, path, i)
+            # captions for maps stored same dict by path
+            map_imgs.append((uri, cap))
+    map_html = ""
+    if map_imgs:
+        figs = []
+        for img, caption in map_imgs:
+            cap = f"<figcaption>{value_html(caption)}</figcaption>" if caption else ""
+            figs.append(f'<figure><img src="{img}" alt="">{cap}</figure>')
+        mode = "single" if len(figs) == 1 else "multi"
+        map_html = f'<div class="gallery map {mode}">{"".join(figs)}</div>'
+
     subtitle_html = f'<div class="subtitle">{value_html(subtitle)}</div>' if subtitle else ""
     kind_label = resolve_kind_label(tpl, d)
     kind_html = f'<div class="kind">{esc(kind_label)}</div>' if kind_label else ""
@@ -598,6 +634,11 @@ def make_html(
     body = body + custom_fields(d) + custom_sections(d) + desc_html
     body = stripe_rows(body)
     vars_ = theme.css_vars()
+    extra_font_css = font_css_for_family(font_key, work_dir, user_id)
+    fam = css_family_name(font_key)
+    if fam:
+        # override theme fonts
+        vars_ = vars_ + f"--font:'{fam}',sans-serif;--heading-font:'{fam}',serif;"
     footer = '<div class="footer">INFOBOX BOT</div>' if watermark else ""
 
     return f"""<!doctype html>
@@ -607,6 +648,7 @@ def make_html(
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'">
 <style>
 {font_css()}
+{extra_font_css}
 :root {{{vars_}}}
 * {{ box-sizing: border-box; box-shadow: none !important; text-shadow: none !important; }}
 html, body {{ margin: 0; padding: 0; background: var(--background); color: var(--text); }}
@@ -617,7 +659,7 @@ body {{ padding: 26px; font-family: var(--font); font-size: 20px; line-height: 1
   border-radius: var(--radius);
 }}
 header {{ padding: 24px 28px 20px; text-align: center; background: var(--panel-alt); border-bottom: var(--border-width) solid var(--border); }}
-.kind {{ color: #000; font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
+.kind {{ color: var(--text); font-size: 14px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }}
 h1 {{ margin: 5px 0 0; overflow-wrap: anywhere; font: 700 36px/1.16 var(--heading-font); color: var(--link); }}
 .subtitle {{ margin-top: 9px; color: var(--text-secondary); font-size: 19px; }}
 a, .wiki-link {{ color: var(--link); text-decoration: none; }}
@@ -674,12 +716,35 @@ section h2 {{
 .battle-text {{ min-width: 0; text-align: left; }}
 .description-text {{ padding: 18px 22px 22px; overflow-wrap: anywhere; }}
 .footer {{ padding: 12px 18px; text-align: right; color: var(--text-secondary); background: var(--panel-alt); border-top: var(--border-width) solid var(--border); font-size: 13px; letter-spacing: .04em; }}
+
+.anthem-block {{ margin: 4px 20px 16px; text-align: center; }}
+.anthem-title {{ color: var(--link); font-size: 17px; margin-bottom: 8px; }}
+.anthem-player {{
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel-alt); border: var(--border-width) solid var(--border);
+  border-radius: 6px; padding: 8px 12px; max-width: 420px; margin: 0 auto;
+}}
+.anthem-play {{
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #222; color: #fff; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; flex: 0 0 auto;
+}}
+.sheet[data-theme="dark"] .anthem-play,
+.sheet[data-theme="aurelia"] .anthem-play {{ background: #ddd; color: #111; }}
+.anthem-bar {{
+  flex: 1; height: 6px; background: #c8c8c8; border-radius: 3px; overflow: hidden;
+}}
+.anthem-bar-fill {{ display: block; width: 18%; height: 100%; background: #555; }}
+.anthem-time {{ font-size: 14px; color: var(--text-secondary); flex: 0 0 auto; min-width: 36px; text-align: right; }}
+.gallery.map {{ margin-top: 8px; }}
 </style>
 </head>
 <body>
 <article class="sheet" id="infobox" data-theme="{esc(theme.key)}">
   <header>{kind_html}<h1>{esc(title)}</h1>{subtitle_html}</header>
   {gallery}
+  {anthem_html}
+  {map_html}
   {body}
   {footer}
 </article>
@@ -693,6 +758,8 @@ async def render_page(
     quality: str = "high",
     output: str | Path | None = None,
     watermark: bool = True,
+    font_key: str = "default",
+    user_id: int | None = None,
 ) -> Path:
     root = Path(work_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -705,6 +772,10 @@ async def render_page(
         raise ValueError("PNG можно сохранять только в рабочую директорию бота.")
 
     scale = QUALITY_SCALE.get(quality, QUALITY_SCALE["high"])
+    if page.data is None:
+        page.data = {}
+    page.data["_font_key"] = font_key or "default"
+    page.data["_font_user_id"] = user_id
 
     if page.theme == "olddoc":
         from olddoc import render_olddoc
@@ -763,7 +834,7 @@ async def render_page(
                 args=["--disable-dev-shm-usage"],
             )
             try:
-                markup = make_html(page, get_theme(page.theme), root, watermark)
+                markup = make_html(page, get_theme(page.theme), root, watermark, font_key=font_key, user_id=user_id)
                 ctx = await browser.new_context(
                     viewport={"width": 880, "height": 900},
                     device_scale_factor=scale,

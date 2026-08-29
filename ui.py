@@ -364,12 +364,44 @@ def settings_kb(watermark: bool | None = None) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [ib("🎨 Тема по умолчанию", "settings:theme")],
             [ib("🖼 Качество PNG", "settings:quality")],
+            [ib("🔤 Шрифт карточек", "settings:font")],
             [ib(f"🏷 Подпись INFOBOX BOT{mark}", "settings:watermark")],
             [ib("🌐 Язык интерфейса", "settings:language")],
             [ib("📤 Формат экспорта", "settings:format")],
             [ib("🏠 Главное меню", "menu:home")],
         ]
     )
+
+
+
+def fonts_kb(
+    choices: list[tuple[str, str]],
+    selected: str,
+    page: int = 0,
+    per_page: int = 8,
+    offset: int = 0,
+) -> InlineKeyboardMarkup:
+    """choices = [(key, label), ...]; offset - стартовый номер (для поиска)."""
+    total = max(1, (len(choices) + per_page - 1) // per_page)
+    page = max(0, min(page, total - 1))
+    chunk = choices[page * per_page : (page + 1) * per_page]
+    rows = []
+    for i, (key, label) in enumerate(chunk):
+        num = offset + page * per_page + i + 1
+        mark = "▼ " if key == selected else ""
+        rows.append([ib(f"{mark}{num}. {label}"[:40], f"font:set:{key}")])
+    nav = []
+    if page > 0:
+        nav.append(ib("⬅️", f"font:page:{page - 1}"))
+    nav.append(ib(f"{page + 1}/{total}", "font:noop"))
+    if page + 1 < total:
+        nav.append(ib("➡️", f"font:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([ib("🔍 Поиск по имени/номеру", "font:search")])
+    rows.append([ib("⬆️ Загрузить свой TTF/OTF", "font:upload")])
+    rows.append([ib("⬅️ Назад", "settings:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def quality_kb(selected: str) -> InlineKeyboardMarkup:

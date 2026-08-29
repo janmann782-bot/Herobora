@@ -4,13 +4,17 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from media import battle_image_groups, image_caption, page_images
+from media import battle_image_groups, image_caption, map_images, page_images
 from models import Page
 from templates import Field, Template, get_template
 from themes import Theme, get_theme
+from fonts_catalog import resolve_font_files, resolve_user_font
 
 
 PILLOW_SCALE = {"standard": 1.25, "high": 1.5, "ultra": 2.0}
+
+_ACTIVE_FONT_REG: str | None = None
+_ACTIVE_FONT_BOLD: str | None = None
 
 
 
@@ -26,6 +30,12 @@ def _resolve_kind_label(tpl: Template, data: dict) -> str:
 
 
 def _font(theme: Theme, size: int, bold: bool = False, heading: bool = False):
+    if _ACTIVE_FONT_REG:
+        path = _ACTIVE_FONT_BOLD if bold and _ACTIVE_FONT_BOLD else _ACTIVE_FONT_REG
+        try:
+            return ImageFont.truetype(path, size), ImageFont.truetype(path, size)
+        except Exception:
+            pass
     here = Path(__file__).resolve().parent
     if theme.key == "aurelia":
         fallback_name = "LiberationMono-Bold.ttf" if bold else "LiberationMono-Regular.ttf"
@@ -178,7 +188,7 @@ def _header(w: int, s: float, tpl: Template, page: Page, theme: Theme) -> Image.
     draw = ImageDraw.Draw(img)
     y = pad
     if kind_lines:
-        _draw_lines(draw, kind_lines, (pad, y), kind_font, (0, 0, 0), kh, w - pad * 2, "center")
+        _draw_lines(draw, kind_lines, (pad, y), kind_font, theme.text, kh, w - pad * 2, "center")
         y += len(kind_lines) * kh + gap
     _draw_lines(draw, title_lines, (pad, y), title_font, theme.text, th, w - pad * 2, "center")
     y += len(title_lines) * th
@@ -640,7 +650,7 @@ def _footer(w: int, s: float, theme: Theme) -> Image.Image:
 
 
 def _standard_groups(tpl: Template, data: dict):
-    skip = {"card_type_label", "title", "description", "image_caption"}
+    skip = {"card_type_label", "title", "description", "image_caption", "anthem_duration"}
     if tpl.subtitle_key:
         skip.add(tpl.subtitle_key)
     names = []
@@ -1206,6 +1216,42 @@ def _render_mirotorets(page: Page, root: Path, path: Path, quality: str = "high"
 
 
 
+
+def _anthem_block(w: int, s: float, title: str, duration: str, theme: Theme) -> Image.Image:
+    pad = int(12 * s)
+    f_title = _font(theme, max(12, int(15 * s)), bold=False)
+    f_time = _font(theme, max(11, int(13 * s)), bold=False)
+    tmp = Image.new("RGB", (10, 10), theme.panel)
+    dr = ImageDraw.Draw(tmp)
+    title_lines = _wrap(dr, title, f_title, w - pad * 2)
+    th = _line_h(dr, f_title)
+    bar_h = int(36 * s)
+    h = pad // 2 + len(title_lines) * th + 6 + bar_h + pad // 2
+    im = Image.new("RGB", (w, h), theme.panel)
+    dr = ImageDraw.Draw(im)
+    y = pad // 2
+    _draw_lines(dr, title_lines, (pad, y), f_title, theme.link if hasattr(theme, "link") else theme.accent, th, w - pad * 2, "center")
+    y += len(title_lines) * th + 6
+    # player bar
+    bx0, by0 = pad, y
+    bx1, by1 = w - pad, y + bar_h
+    dr.rounded_rectangle([bx0, by0, bx1, by1], radius=int(6 * s), outline=theme.border, width=max(1, int(s)), fill=theme.panel_alt if hasattr(theme, "panel_alt") else theme.panel)
+    # play circle
+    r = int(11 * s)
+    cx, cy = bx0 + int(18 * s), (by0 + by1) // 2
+    dr.ellipse([cx - r, cy - r, cx + r, cy + r], fill=theme.text)
+    # progress
+    bar_x0 = cx + r + int(10 * s)
+    bar_x1 = bx1 - int(50 * s)
+    bar_y = cy
+    dr.line([bar_x0, bar_y, bar_x1, bar_y], fill=theme.border, width=max(2, int(3 * s)))
+    fill_x = bar_x0 + int((bar_x1 - bar_x0) * 0.18)
+    dr.line([bar_x0, bar_y, fill_x, bar_y], fill=theme.text_secondary, width=max(2, int(3 * s)))
+    dur = duration or "0:00"
+    tw = f_time.getlength(dur) if hasattr(f_time, "getlength") else len(dur) * 8
+    dr.text((bx1 - int(12 * s) - tw, cy - int(8 * s)), dur, fill=theme.text_secondary, font=f_time)
+    return im
+
 def render_pillow(
     page: Page,
     work_dir: str | Path,
@@ -1230,6 +1276,25 @@ def render_pillow(
 
     theme = get_theme(page.theme)
     tpl = get_template(page.type)
+    # пользовательский/выбранный шрифт
+    _fk = (page.data or {}).get("_font_key") or "default"
+    _uid = (page.data or {}).get("_font_user_id")
+    _reg = _bold = None
+    if _fk and _fk != "default":
+        if str(_fk).startswith("user:") and _uid is not None:
+            _reg = resolve_user_font(root, int(_uid), str(_fk))
+            _bold = _reg
+        else:
+            _reg, _bold = resolve_font_files(str(_fk))
+    if _reg and _reg.is_file():
+        page.data["_pillow_font_reg"] = str(_reg)
+        page.data["_pillow_font_bold"] = str(_bold or _reg)
+        global _ACTIVE_FONT_REG, _ACTIVE_FONT_BOLD
+        _ACTIVE_FONT_REG = str(_reg)
+        _ACTIVE_FONT_BOLD = str(_bold or _reg)
+    else:
+        global _ACTIVE_FONT_REG, _ACTIVE_FONT_BOLD
+        _ACTIVE_FONT_REG = _ACTIVE_FONT_BOLD = None
     d = page.data
     s = PILLOW_SCALE.get(quality, PILLOW_SCALE["high"])
     card_w = int(820 * s)
@@ -1248,6 +1313,22 @@ def render_pillow(
                 media.append((media_path, image_caption(d, value, i)))
         if media:
             pic = _gallery(inner_w, s, media, theme)
+            if pic:
+                blocks.append(pic)
+
+        # гимн (полоска как в вики)
+        anthem = str(d.get("anthem") or "").strip()
+        if anthem:
+            blocks.append(_anthem_block(inner_w, s, anthem, str(d.get("anthem_duration") or "").strip(), theme))
+
+        # карты территорий
+        maps = []
+        for i, value in enumerate(map_images(d)):
+            media_path = _media_path(value, root)
+            if media_path:
+                maps.append((media_path, image_caption(d, value, i)))
+        if maps:
+            pic = _gallery(inner_w, s, maps, theme)
             if pic:
                 blocks.append(pic)
 

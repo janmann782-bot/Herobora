@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from aiogram.fsm.state import State, StatesGroup
 
-from media import page_images, safe_unlink
+from media import map_images, page_images, safe_unlink
 
 if TYPE_CHECKING:
     from aiogram.fsm.context import FSMContext
@@ -13,10 +13,20 @@ if TYPE_CHECKING:
     from db import Db
 
 
+class FontUpload(StatesGroup):
+    wait = State()
+
+
+class FontSearch(StatesGroup):
+    wait = State()
+
+
 class NewPage(StatesGroup):
     field = State()
     image = State()
     image_caption = State()
+    map_image = State()
+    map_caption = State()
     battle_text = State()
     battle_flag = State()
     theme = State()
@@ -37,6 +47,8 @@ class EditPage(StatesGroup):
     section = State()
     image = State()
     image_caption = State()
+    map_image = State()
+    map_caption = State()
     battle_text = State()
     battle_flag = State()
 
@@ -44,7 +56,8 @@ class EditPage(StatesGroup):
 async def clear_flow(state: FSMContext, user_id: int, db: Db, cfg: Config) -> None:
     d = await state.get_data()
     safe_unlink(d.get("preview_path"), cfg.work_dir, "preview_")
-    for path in page_images(d.get("page_data") or {}):
+    data = d.get("page_data") or {}
+    for path in list(page_images(data)) + list(map_images(data)):
         if await db.drop_unattached_media(path, user_id):
             safe_unlink(path, cfg.work_dir, "media_")
     await state.clear()
