@@ -26,10 +26,12 @@ from media import (
     MAX_PAGE_IMAGES,
     BadImage,
     image_caption,
+    map_images,
     page_images,
     safe_unlink,
     save_image,
     set_image_caption,
+    set_map_images,
     set_page_images,
 )
 from models import Page
@@ -154,6 +156,8 @@ async def show_preview(
                 cfg.work_dir,
                 settings.quality,
                 watermark=settings.watermark,
+                font_key=getattr(settings, "font", "default") or "default",
+                user_id=user_id,
             ),
         )
         p.preview_path = path.name
@@ -332,13 +336,9 @@ async def back_field(q: CallbackQuery, state: FSMContext) -> None:
     await ask_field(q.message, state)
 
 
-async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot, user) -> None:
+async def go_theme_or_preview(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot, user) -> None:
     d = await state.get_data()
-    if d.get("image_mode") == "draft":
-        await show_preview(msg, state, db, cfg, bot, user)
-        return
     ptype = d.get("type") or ""
-    # если для типа одна тема - не спрашиваем, сразу превью
     from themes import THEMES, theme_allowed
     allowed = [k for k in THEMES if theme_allowed(k, ptype)]
     if len(allowed) <= 1:
@@ -353,6 +353,33 @@ async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot:
         tr("choose_theme"),
         themes_kb("dt", d.get("theme", "light"), ptype),
     )
+
+
+async def ask_map_images(msg: Message, state: FSMContext) -> None:
+    d = await state.get_data()
+    count = len(map_images(d.get("page_data") or {}))
+    max_count = MAX_PAGE_IMAGES
+    await state.set_state(NewPage.map_image)
+    text = tr(
+        "send_map_image",
+        max_mb=d.get("max_image_mb", 12),
+        count=count,
+        max_count=max_count,
+    )
+    await flow_show(msg, state, text, image_kb(count, d.get("type") or ""))
+
+
+async def after_image(msg: Message, state: FSMContext, db: Db, cfg: Config, bot: Bot, user) -> None:
+    d = await state.get_data()
+    if d.get("image_mode") == "draft":
+        await show_preview(msg, state, db, cfg, bot, user)
+        return
+    ptype = d.get("type") or ""
+    # для страны/региона - шаг с картой территорий
+    if ptype in ("country", "region"):
+        await ask_map_images(msg, state)
+        return
+    await go_theme_or_preview(msg, state, db, cfg, bot, user)
 
 
 @router.callback_query(NewPage.image, F.data.in_({"img:skip", "img:done"}))
@@ -1129,3 +1156,94 @@ async def draft_old_actions(q: CallbackQuery, state: FSMContext, db: Db, cfg: Co
     if action != "apply":
         await q.answer()
     await _draft_old_apply(q, state, db, cfg, bot, action)
+
+
+@router.callback_query(NewPage.map_image, F.data.in_({"img:skip", "img:done"}))
+async def skip_map_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config, bot: Bot) -> None:
+    await q.answer()
+    await go_theme_or_preview(q.message, state, db, cfg, bot, q.from_user)
+
+
+@router.callback_query(NewPage.map_image, F.data == "img:back")
+async def back_map_image(q: CallbackQuery, state: FSMContext) -> None:
+    await q.answer()
+    d = await state.get_data()
+    await state.set_state(NewPage.image)
+    tpl = get_template(d["type"])
+    count = len(page_images(d.get("page_data") or {}))
+    max_count = MAX_PAGE_IMAGES
+    text = tr(
+        "send_image",
+        label=tpl.image_label.lower(),
+        max_mb=d.get("max_image_mb", 12),
+        count=count,
+        max_count=max_count,
+    )
+    await flow_show(q.message, state, text, image_kb(count, d.get("type") or ""))
+
+
+@router.message(NewPage.map_image, F.photo | F.document)
+async def take_map_image(msg: Message, state: FSMContext, bot: Bot, db: Db, cfg: Config) -> None:
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = map_images(data)
+    ptype = d.get("type") or ""
+    max_count = MAX_PAGE_IMAGES
+    if len(images) >= max_count:
+        await flow_show(msg, state, tr("image_limit", max_count=max_count), image_kb(len(images), ptype))
+        return
+    f = msg.photo[-1] if msg.photo else msg.document
+    if not f:
+        await flow_show(msg, state, tr("image_only"), image_kb(len(images), ptype))
+        return
+    size = getattr(f, "file_size", 0) or 0
+    if size > cfg.max_image_mb * 1024 * 1024:
+        await flow_show(
+            msg, state,
+            tr("image_bad", error=f"файл больше {cfg.max_image_mb} МБ"),
+            image_kb(len(images), ptype),
+        )
+        return
+    from io import BytesIO
+    buf = BytesIO()
+    try:
+        await bot.download(f, destination=buf)
+        info = await save_image(buf.getvalue(), msg.from_user.id, cfg.work_dir, cfg.max_image_mb)
+    except BadImage as e:
+        await flow_show(msg, state, tr("image_bad", error=str(e)), image_kb(len(images), ptype))
+        return
+    except Exception:
+        await flow_show(msg, state, tr("image_bad", error="не удалось скачать файл"), image_kb(len(images), ptype))
+        return
+    await db.add_media(msg.from_user.id, info.path.name, info.width, info.height)
+    images = list(images) + [info.path.name]
+    set_map_images(data, images)
+    await state.update_data(page_data=data)
+    await flow_show(
+        msg, state,
+        tr("send_map_image", max_mb=d.get("max_image_mb", 12), count=len(images), max_count=max_count),
+        image_kb(len(images), ptype),
+    )
+
+
+@router.callback_query(NewPage.map_image, F.data.startswith("img:rm:"))
+async def remove_map_image(q: CallbackQuery, state: FSMContext, db: Db, cfg: Config) -> None:
+    await q.answer()
+    d = await state.get_data()
+    data = d.get("page_data") or {}
+    images = map_images(data)
+    try:
+        i = int(q.data.split(":")[-1])
+    except ValueError:
+        return
+    if 0 <= i < len(images):
+        images.pop(i)
+        set_map_images(data, images)
+        await state.update_data(page_data=data)
+    await flow_show(
+        q.message,
+        state,
+        tr("send_map_image", max_mb=d.get("max_image_mb", 12), count=len(images), max_count=MAX_PAGE_IMAGES),
+        image_kb(len(images), d.get("type") or ""),
+    )
+

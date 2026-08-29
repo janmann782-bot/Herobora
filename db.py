@@ -101,6 +101,10 @@ class Db:
                 conn.execute(
                     "ALTER TABLE user_settings ADD COLUMN watermark INTEGER NOT NULL DEFAULT 1"
                 )
+            if "font" not in cols:
+                conn.execute(
+                    "ALTER TABLE user_settings ADD COLUMN font TEXT NOT NULL DEFAULT 'default'"
+                )
             conn.execute(
                 "INSERT OR IGNORE INTO generation_totals(id, total) VALUES (1, 0)"
             )
@@ -332,6 +336,7 @@ class Db:
             quality=row["quality"],
             export_format=row["export_format"],
             watermark=bool(row["watermark"]),
+            font=row["font"] if "font" in row.keys() else "default",
         )
 
     async def save_settings(self, s: UserSettings) -> None:
@@ -345,16 +350,17 @@ class Db:
             )
             conn.execute(
                 """
-                INSERT INTO user_settings(user_id, theme, language, quality, export_format, watermark)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO user_settings(user_id, theme, language, quality, export_format, watermark, font)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     theme = excluded.theme,
                     language = excluded.language,
                     quality = excluded.quality,
                     export_format = excluded.export_format,
-                    watermark = excluded.watermark
+                    watermark = excluded.watermark,
+                    font = excluded.font
                 """,
-                (s.user_id, s.theme, s.language, s.quality, s.export_format, int(s.watermark)),
+                (s.user_id, s.theme, s.language, s.quality, s.export_format, int(s.watermark), getattr(s, "font", "default") or "default"),
             )
 
     @staticmethod
